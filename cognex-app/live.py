@@ -373,3 +373,205 @@ def complete_story_extract(req: StoryExtractRequest):
         return draft_decision_from_story(req.work_item, req.qa_pairs)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Offboarding / handoff — "Complete the Story" run in reverse at departure.
+# Same shape as extract.py: Claude asks targeted questions, then later
+# extracts structure from free-text answers via a forced tool call. Grounded
+# in the departing persona's OWN goals and contributed decisions (not a fixed
+# checklist), and a third call matches the resulting items to the best-fit
+# teammate by department and current goal load.
+# ---------------------------------------------------------------------------
+GENERATE_QUESTIONS_SCHEMA = {
+    "name": "submit_handoff_questions",
+    "description": "Submit 3-5 targeted handoff questions for a departing employee.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "questions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "3-5 short, specific questions that would surface unfinished work, undocumented "
+                    "context, and risks a successor would need. Reference their actual goal/decision "
+                    "context by name where relevant rather than asking generically."
+                ),
+            }
+        },
+        "required": ["questions"],
+    },
+}
+
+
+def generate_handoff_questions(persona: dict, goals: list, decisions: list) -> list:
+    client = Anthropic()
+    context = f"Departing employee: {persona['name']}, {persona['title']}, {persona.get('dept', '')} department.\n"
+    if goals:
+        context += "Their individual goal(s): " + "; ".join(g["title"] for g in goals) + "\n"
+    if decisions:
+        context += "Decisions they contributed to company memory: " + "; ".join(d["title"] for d in decisions) + "\n"
+    if not goals and not decisions:
+        context += "No individual goals or contributed decisions are on file for them — ask generally.\n"
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=512,
+        system=(
+            "You generate a short, targeted exit-interview-style question set for an employee who is "
+            "leaving their role, so their successor doesn't lose context. Ground questions in the "
+            "specifics given rather than a generic checklist."
+        ),
+        tools=[GENERATE_QUESTIONS_SCHEMA],
+        tool_choice={"type": "tool", "name": "submit_handoff_questions"},
+        messages=[{"role": "user", "content": context}],
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_handoff_questions":
+            return block.input.get("questions", [])
+    raise RuntimeError("Claude did not return the expected submit_handoff_questions tool call.")
+
+
+EXTRACT_HANDOFF_SCHEMA = {
+    "name": "submit_handoff_report",
+    "description": "Submit the structured handoff report extracted from the departing employee's answers.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "responsibilities": {"type": "array", "items": {"type": "string"}, "description": "Ongoing responsibilities/ownership that need a new owner."},
+            "incomplete_tasks": {"type": "array", "items": {"type": "string"}, "description": "Specific unfinished tasks or work in progress."},
+            "key_context": {"type": "array", "items": {"type": "string"}, "description": "Undocumented context, relationships, or institutional knowledge a successor would otherwise lose."},
+            "risks": {"type": "array", "items": {"type": "string"}, "description": "Risks or open issues flagged in the answers."},
+            "needs_clarification": {"type": "array", "items": {"type": "string"}, "description": "Any question that wasn't actually answered usefully."},
+        },
+        "required": ["responsibilities", "incomplete_tasks", "key_context", "risks", "needs_clarification"],
+    },
+}
+
+
+def extract_handoff_report(persona: dict, qa_pairs: list) -> dict:
+    client = Anthropic()
+    transcript = "\n".join(f"Q: {p.get('question','')}\nA: {p.get('answer','')}" for p in qa_pairs)
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=768,
+        system=(
+            f"You turn {persona.get('name', 'an employee')}'s exit-interview answers into a clean structured "
+            "handoff report for their successor and manager. Stay strictly grounded in what was actually said "
+            "— do not invent detail. Flag an unusable answer via needs_clarification rather than papering over it."
+        ),
+        tools=[EXTRACT_HANDOFF_SCHEMA],
+        tool_choice={"type": "tool", "name": "submit_handoff_report"},
+        messages=[{"role": "user", "content": transcript}],
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_handoff_report":
+            return block.input
+    raise RuntimeError("Claude did not return the expected submit_handoff_report tool call.")
+
+
+SUGGEST_DELEGATES_SCHEMA = {
+    "name": "submit_delegate_suggestions",
+    "description": "Submit a suggested assignee for each handoff item, based on fit and current workload.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "suggestions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "item": {"type": "string", "description": "The exact responsibility/task/goal text this suggestion is for."},
+                        "candidate_id": {"type": "string", "description": "id of the suggested candidate — must be one of the ids given."},
+                        "rationale": {"type": "string", "description": "One short sentence on why this person fits."},
+                    },
+                    "required": ["item", "candidate_id", "rationale"],
+                },
+            }
+        },
+        "required": ["suggestions"],
+    },
+}
+
+
+def suggest_delegates(items: list, candidates: list) -> list:
+    client = Anthropic()
+    cand_text = "\n".join(
+        f"- id={c['id']}: {c['name']}, {c['title']}, {c.get('dept', '')} dept, currently owns {c.get('workload', 0)} goal(s)"
+        for c in candidates
+    )
+    items_text = "\n".join(f"- {i}" for i in items)
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=768,
+        system=(
+            "You match each handoff item to the best-fit candidate from the list, weighing department fit "
+            "and current workload (fewer existing goals means more capacity). Use ONLY the candidate ids given, "
+            "and return one suggestion per item."
+        ),
+        tools=[SUGGEST_DELEGATES_SCHEMA],
+        tool_choice={"type": "tool", "name": "submit_delegate_suggestions"},
+        messages=[{"role": "user", "content": f"Candidates:\n{cand_text}\n\nItems needing an owner:\n{items_text}"}],
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_delegate_suggestions":
+            return block.input.get("suggestions", [])
+    raise RuntimeError("Claude did not return the expected submit_delegate_suggestions tool call.")
+
+
+class OffboardingQuestionsRequest(BaseModel):
+    persona: PersonaIn
+    goals: list[GoalIn] = []
+    decisions: list[DecisionIn] = []
+
+
+@router.post("/offboarding/questions")
+def offboarding_questions(req: OffboardingQuestionsRequest):
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    try:
+        questions = generate_handoff_questions(
+            req.persona.model_dump(), [g.model_dump() for g in req.goals], [d.model_dump() for d in req.decisions]
+        )
+        return {"questions": questions}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+
+
+class OffboardingExtractRequest(BaseModel):
+    persona: PersonaIn
+    qa_pairs: list[dict] = []
+
+
+@router.post("/offboarding/extract")
+def offboarding_extract(req: OffboardingExtractRequest):
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    try:
+        return extract_handoff_report(req.persona.model_dump(), req.qa_pairs)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+
+
+class DelegateCandidateIn(BaseModel):
+    id: str
+    name: str
+    title: str
+    dept: str = ""
+    workload: int = 0
+
+
+class SuggestDelegatesRequest(BaseModel):
+    items: list[str] = []
+    candidates: list[DelegateCandidateIn] = []
+
+
+@router.post("/offboarding/suggest-delegates")
+def offboarding_suggest_delegates(req: SuggestDelegatesRequest):
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    try:
+        suggestions = suggest_delegates(req.items, [c.model_dump() for c in req.candidates])
+        return {"suggestions": suggestions}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
