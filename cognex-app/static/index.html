@@ -1055,8 +1055,7 @@
       "</form>" +
       '<div class="divider">or preview a demo account</div>' +
       '<div class="quick-accounts">' + quickHtml + "</div>" +
-      '<div class="login-links">New company? <button class="link-btn" id="go-signup">Set up your company →</button></div>' +
-      '<div class="screen-footnote">Demo password for every account: <strong>' + DEMO_PASSWORD + "</strong> — sign-in here is illustrative only, nothing is really authenticated.</div>" +
+      '<div class="screen-footnote">Demo password for every account: <strong>' + DEMO_PASSWORD + "</strong> — sign-in here is illustrative only, nothing is really authenticated. New companies are onboarded by Cognex staff, not self-serve.</div>" +
       '<div class="staff-link"><button id="go-staff">Cognex staff sign-in</button></div>';
 
     document.getElementById("login-form").addEventListener("submit", function (e) {
@@ -1081,10 +1080,6 @@
         session = { type: "company", companyId: "cognex-labs", personaId: btn.getAttribute("data-quick") };
         renderShell();
       });
-    });
-    document.getElementById("go-signup").addEventListener("click", function () {
-      ui.wizard = { mode: "signup", step: 1, data: {} };
-      renderShell();
     });
     document.getElementById("go-staff").addEventListener("click", function () {
       var email = prompt("Cognex staff email:", "admin@cognex.ai");
@@ -1132,18 +1127,20 @@
       return;
     }
 
-    // step 2 — the founding admin account
+    // step 2 — the company's first team admin. Cognex staff always appoints exactly one here;
+    // that person can then appoint further team admins, build the chain of command, and add
+    // employees on their own — see the Admin tab.
     card.innerHTML =
       '<button class="wizard-back" id="wiz-back">← Back</button>' +
       '<div class="step-dots">' + dots + "</div>" +
-      '<div class="screen-title">' + (w.mode === "platform" ? "Founding admin account" : "You're the first account") + "</div>" +
-      '<div class="screen-sub">' + (w.mode === "platform" ? "Who should be the first org admin at " + esc(w.data.companyName) + "?" : "You'll be created as the CEO and org admin for " + esc(w.data.companyName) + ".") + "</div>" +
+      '<div class="screen-title">Founding team admin</div>' +
+      '<div class="screen-sub">Who should be the first team admin at ' + esc(w.data.companyName) + '? They\'ll be able to appoint more team admins, build out the chain of command, and add employees from here.</div>' +
       '<form id="wiz-step2">' +
       '<div class="field"><label>Full name</label><input type="text" id="wiz-name" placeholder="Jane Founder" value="' + esc(w.data.name || "") + '" required /></div>' +
       '<div class="field"><label>Title</label><input type="text" id="wiz-title" placeholder="CEO" value="' + esc(w.data.title || "CEO") + '" required /></div>' +
       '<div class="field"><label>Work email</label><input type="email" id="wiz-email" placeholder="jane@' + esc(slugPreview(w.data.companyName)) + '.com" value="' + esc(w.data.email || "") + '" required /></div>' +
       (ui.loginError ? '<div class="field-error">' + esc(ui.loginError) + "</div>" : "") +
-      '<button type="submit" class="btn-primary btn-block" style="margin-top:6px">' + (w.mode === "platform" ? "Create company" : "Create company & sign in") + "</button>" +
+      '<button type="submit" class="btn-primary btn-block" style="margin-top:6px">Create company</button>' +
       "</form>" +
       '<div class="screen-footnote">Their account password will be <strong>' + DEMO_PASSWORD + "</strong>, same as every other demo account.</div>";
 
@@ -1174,16 +1171,9 @@
       };
       COMPANIES[companyId] = company;
 
-      if (w.mode === "platform") {
-        ui.wizard = null;
-        ui.platformNotice = { companyId: companyId, founderEmail: email };
-        renderShell();
-      } else {
-        ui.wizard = null;
-        session = { type: "company", companyId: companyId, personaId: founderId };
-        ui.showWelcomeBanner = true;
-        renderShell();
-      }
+      ui.wizard = null;
+      ui.platformNotice = { companyId: companyId, founderEmail: email };
+      renderShell();
     });
   }
   function slugPreview(name) { return (name || "yourcompany").toLowerCase().replace(/[^a-z0-9]+/g, "") || "yourcompany"; }
@@ -1197,7 +1187,7 @@
     var notice = "";
     if (ui.platformNotice) {
       var nc = COMPANIES[ui.platformNotice.companyId];
-      notice = '<div class="success-note">✓ ' + esc(nc.name) + " created. Founding admin: " + esc(ui.platformNotice.founderEmail) + " (password: " + DEMO_PASSWORD + ")</div>";
+      notice = '<div class="success-note">✓ ' + esc(nc.name) + " created. Founding team admin: " + esc(ui.platformNotice.founderEmail) + " (password: " + DEMO_PASSWORD + ")</div>";
     }
     var rows = ids.map(function (id) {
       var c = COMPANIES[id];
@@ -1206,7 +1196,7 @@
       return "<tr>" +
         '<td><div class="companies-name"><div class="avatar sm" style="background:var(--accent-soft);color:var(--accent-ink)">' + esc(initialsOf(c.name)) + '</div><div><div style="font-weight:600">' + esc(c.name) + '</div><div style="font-size:11.5px;color:var(--ink-faint)">' + esc(c.industry) + "</div></div></div></td>" +
         "<td>" + count + " member" + (count === 1 ? "" : "s") + "</td>" +
-        "<td>" + admins + " admin" + (admins === 1 ? "" : "s") + "</td>" +
+        "<td>" + admins + " team admin" + (admins === 1 ? "" : "s") + "</td>" +
         "<td>" + (c.seeded ? "Seed data" : "Onboarded this session") + "</td>" +
         '<td><button class="btn-secondary" data-enter="' + esc(id) + '">Enter as support</button></td>' +
         "</tr>";
@@ -1218,7 +1208,7 @@
       '<div><div class="section-title">Companies</div><div class="section-sub" style="margin-bottom:0">Every organization running on Cognex.</div></div>' +
       '<button class="btn-primary" id="platform-onboard">+ Onboard a new company</button>' +
       "</div>" +
-      '<div class="panel panel-pad"><div class="roster-table-wrap"><table class="roster-table companies-table"><thead><tr><th>Company</th><th>Members</th><th>Org admins</th><th>Status</th><th></th></tr></thead><tbody>' +
+      '<div class="panel panel-pad"><div class="roster-table-wrap"><table class="roster-table companies-table"><thead><tr><th>Company</th><th>Members</th><th>Team admins</th><th>Status</th><th></th></tr></thead><tbody>' +
       rows + "</tbody></table></div></div>";
 
     document.getElementById("platform-onboard").addEventListener("click", function () {
@@ -1802,7 +1792,7 @@
       members.forEach(function (p) {
         var manager = p.reportsTo ? company.personas[p.reportsTo] : null;
         var badges = '<span class="badge badge-neutral">L' + p.level + "</span>";
-        if (p.isOrgAdmin) badges += ' <span class="badge badge-admin">Admin</span>';
+        if (p.isOrgAdmin) badges += ' <span class="badge badge-admin">Team Admin</span>';
         html += '<div class="tree-card"><div class="avatar" style="background:' + p.bg + ';color:' + p.fg + '">' + esc(p.initials) + "</div>" +
           '<div class="tn">' + esc(p.name) + '</div><div class="tt">' + esc(p.title) + '</div><div class="td">' + esc(p.dept || "") + "</div>" +
           '<div class="badges">' + badges + "</div>" +
@@ -1818,7 +1808,7 @@
   function renderAdmin() {
     var company = currentCompany(), p = currentPersona();
     var root = document.getElementById("admin-root");
-    if (!p.isOrgAdmin) { root.innerHTML = '<div class="empty-decisions">Only an org admin can manage the team roster.</div>'; return; }
+    if (!p.isOrgAdmin) { root.innerHTML = '<div class="empty-decisions">Only a team admin can manage the team roster.</div>'; return; }
 
     var editing = ui.editingMemberId ? company.personas[ui.editingMemberId] : null;
     var deptList = Array.from(new Set(Object.keys(company.personas).map(function (id) { return company.personas[id].dept; }).filter(Boolean)));
@@ -1835,7 +1825,7 @@
     var html = "";
     if (session.viaSupport) html += '<div class="admin-banner">🛟 You are managing this roster as Cognex support.</div>';
     html += '<div class="section-title">' + (editing ? "Edit team member" : "Add a team member") + '</div>' +
-      '<div class="section-sub">Org admins can add roles, assign clearance, and grant admin rights to others.</div>' +
+      '<div class="section-sub">Team admins can add roles, assign clearance, and appoint other team admins.</div>' +
       '<form id="roster-form">' +
       '<div class="form-grid">' +
       '<div class="field"><label>Full name</label><input type="text" id="rf-name" value="' + (editing ? esc(editing.name) : "") + '" required /></div>' +
@@ -1846,7 +1836,7 @@
       '<div class="field"><label>Email</label><input type="email" id="rf-email" value="' + (editing ? esc(editing.email) : "") + '" placeholder="name@company.com" required /></div>' +
       '<div class="field"><label>Reports to</label><select id="rf-reports">' + reportsOptions + "</select></div>" +
       "</div>" +
-      '<div class="form-check"><input type="checkbox" id="rf-admin"' + (editing && editing.isOrgAdmin ? " checked" : "") + " /> <label for=\"rf-admin\" style=\"margin:0;font-weight:400\">Grant org admin (can manage roster & roles)</label></div>" +
+      '<div class="form-check"><input type="checkbox" id="rf-admin"' + (editing && editing.isOrgAdmin ? " checked" : "") + " /> <label for=\"rf-admin\" style=\"margin:0;font-weight:400\">Appoint as team admin (can manage roster & chain of command)</label></div>" +
       '<div class="form-actions">' +
       '<button type="submit" class="btn-primary">' + (editing ? "Save changes" : "Add member") + "</button>" +
       (editing ? '<button type="button" class="btn-secondary" id="rf-cancel">Cancel</button>' : "") +
@@ -1854,13 +1844,13 @@
       "</form>" +
       '<hr class="sep" />' +
       '<div class="section-title">Team roster</div>' +
-      '<div class="section-sub">' + Object.keys(company.personas).length + " member" + (Object.keys(company.personas).length === 1 ? "" : "s") + " · " + countAdmins(company) + " org admin" + (countAdmins(company) === 1 ? "" : "s") + "</div>" +
-      '<div class="roster-table-wrap"><table class="roster-table"><thead><tr><th>Member</th><th>Department</th><th>Clearance</th><th>Reports to</th><th>Admin</th><th></th></tr></thead><tbody>' +
+      '<div class="section-sub">' + Object.keys(company.personas).length + " member" + (Object.keys(company.personas).length === 1 ? "" : "s") + " · " + countAdmins(company) + " team admin" + (countAdmins(company) === 1 ? "" : "s") + "</div>" +
+      '<div class="roster-table-wrap"><table class="roster-table"><thead><tr><th>Member</th><th>Department</th><th>Clearance</th><th>Reports to</th><th>Team admin</th><th></th></tr></thead><tbody>' +
       Object.keys(company.personas).map(function (id) {
         var m = company.personas[id];
         var mgr = m.reportsTo ? company.personas[m.reportsTo] : null;
         return "<tr><td><div class=\"roster-who\"><div class=\"avatar sm\" style=\"background:" + m.bg + ";color:" + m.fg + "\">" + esc(m.initials) + "</div><div><div style=\"font-weight:600\">" + esc(m.name) + (id === session.personaId ? " (you)" : "") + "</div><div style=\"font-size:11.5px;color:var(--ink-faint)\">" + esc(m.title) + "</div></div></div></td>" +
-          "<td>" + esc(m.dept || "—") + "</td><td>" + TIER_NAME[m.level] + "</td><td>" + (mgr ? esc(mgr.name) : "—") + "</td><td>" + (m.isOrgAdmin ? '<span class="badge badge-admin">Admin</span>' : "—") + "</td>" +
+          "<td>" + esc(m.dept || "—") + "</td><td>" + TIER_NAME[m.level] + "</td><td>" + (mgr ? esc(mgr.name) : "—") + "</td><td>" + (m.isOrgAdmin ? '<span class="badge badge-admin">Team Admin</span>' : "—") + "</td>" +
           '<td><div class="roster-actions"><button class="btn-secondary" data-edit="' + esc(id) + '">Edit</button><button class="btn-danger" data-remove="' + esc(id) + '">Remove</button></div></td></tr>';
       }).join("") + "</tbody></table></div>";
 
@@ -1912,7 +1902,7 @@
       if (existing && !(editing && existing.persona.id === editing.id)) { alert("That email is already in use."); return; }
 
       if (editing) {
-        if (!isAdmin && editing.isOrgAdmin && countAdmins(company) <= 1) { alert("You can't remove the last org admin. Promote someone else first."); return; }
+        if (!isAdmin && editing.isOrgAdmin && countAdmins(company) <= 1) { alert("You can't remove the last team admin. Promote someone else first."); return; }
         Object.assign(editing, { name: name, title: title, dept: dept, level: level, email: email, reportsTo: reportsTo, isOrgAdmin: isAdmin, initials: initialsOf(name) });
         ui.editingMemberId = null;
       } else {
@@ -1935,7 +1925,7 @@
         var id = btn.getAttribute("data-remove");
         if (id === session.personaId) { alert("You can't remove your own account while signed in as them."); return; }
         var target = company.personas[id];
-        if (target.isOrgAdmin && countAdmins(company) <= 1) { alert("You can't remove the last org admin. Promote someone else first."); return; }
+        if (target.isOrgAdmin && countAdmins(company) <= 1) { alert("You can't remove the last team admin. Promote someone else first."); return; }
         if (!confirm("Remove " + target.name + " from " + company.name + "?")) return;
         delete company.personas[id];
         renderApp();
@@ -2156,7 +2146,7 @@
     if (!h) return;
     var departing = company.personas[h.fromPersonaId];
     if (!departing) { h.status = "done"; renderApp(); return; }
-    if (departing.isOrgAdmin && countAdmins(company) <= 1) { alert("Can't remove " + departing.name + " — they're the last remaining org admin. Promote someone else to admin first."); return; }
+    if (departing.isOrgAdmin && countAdmins(company) <= 1) { alert("Can't remove " + departing.name + " — they're the last remaining team admin. Promote someone else to team admin first."); return; }
     if (!confirm("Finish handoff and remove " + departing.name + " from " + company.name + "? This can't be undone.")) return;
     delete company.personas[h.fromPersonaId];
     h.status = "done";
