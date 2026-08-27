@@ -41,6 +41,8 @@ from permissions import serialize_decision_for
 from agent import run_agent_turn
 from extract import draft_decision_from_story
 import live
+import slack_integration
+from db import init_db
 
 app = FastAPI(title="Cognex")
 
@@ -51,11 +53,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+def _startup():
+    # Creates the SQLite tables (Slack connection/messages/candidates) if
+    # they don't exist yet. Safe to run on every boot. See db.py.
+    init_db()
+
+
 # The multi-tenant, real-Claude endpoints the deployed frontend actually
 # calls (POST /api/ask, POST /api/complete-story/extract, GET /api/health).
 # See live.py for why this is a separate module from the single-tenant
 # reference endpoints below.
 app.include_router(live.router)
+
+# Slack OAuth connect + ingestion + decision-extraction endpoints. See
+# slack_integration.py for the full pipeline and its design rationale.
+app.include_router(slack_integration.router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 

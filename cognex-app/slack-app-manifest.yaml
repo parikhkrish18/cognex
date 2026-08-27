@@ -1,0 +1,37 @@
+# Slack App Manifest for Cognex's Slack integration.
+#
+# How to use this:
+#   1. Go to https://api.slack.com/apps -> "Create New App" -> "From an app manifest"
+#   2. Pick the Slack workspace you want to connect (can be your own for testing)
+#   3. Paste the contents of this file in, review, click "Create"
+#   4. On the app's "Basic Information" page, copy the Client ID (safe to share)
+#      and Client Secret (do NOT paste this in chat — set it directly as a
+#      Railway environment variable, same as the Anthropic API key)
+#   5. Give Cognex those two values: SLACK_CLIENT_ID and SLACK_CLIENT_SECRET
+#
+# The redirect URL below already matches what's live at cognex.arviahstudio.com.
+# If you ever move the app to a different domain, update oauth_config.redirect_urls
+# and the server's SLACK_REDIRECT_URI env var together — they must match exactly.
+
+display_information:
+  name: Cognex
+  description: Captures decisions from your team's Slack conversations into Cognex's organizational memory.
+  background_color: "#1a1a2e"
+
+oauth_config:
+  redirect_urls:
+    - https://cognex.arviahstudio.com/api/integrations/slack/callback
+  scopes:
+    bot:
+      - channels:history
+      - channels:read
+      - groups:history
+      - groups:read
+      - users:read
+      - users:read.email
+      - team:read
+
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
