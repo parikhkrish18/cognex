@@ -42,7 +42,9 @@ from agent import run_agent_turn
 from extract import draft_decision_from_story
 import live
 import slack_integration
+import persistence
 from db import init_db
+from db_postgres import init_db as init_postgres_db
 
 app = FastAPI(title="Cognex")
 
@@ -59,6 +61,11 @@ def _startup():
     # Creates the SQLite tables (Slack connection/messages/candidates) if
     # they don't exist yet. Safe to run on every boot. See db.py.
     init_db()
+    # Creates the Postgres tables (companies/personas/decisions/goals) if
+    # they don't exist yet, and seeds the Cognex Labs demo company on a
+    # brand-new database. Safe to run on every boot — the seed only fires
+    # once, when the companies table is empty. See db_postgres.py.
+    init_postgres_db()
 
 
 # The multi-tenant, real-Claude endpoints the deployed frontend actually
@@ -70,6 +77,10 @@ app.include_router(live.router)
 # Slack OAuth connect + ingestion + decision-extraction endpoints. See
 # slack_integration.py for the full pipeline and its design rationale.
 app.include_router(slack_integration.router)
+
+# Real persistence — companies/personas/decisions/goals in Postgres instead
+# of only in the browser tab. See persistence.py for scope and design notes.
+app.include_router(persistence.router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 

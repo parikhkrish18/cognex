@@ -1100,14 +1100,81 @@
     };
   }
 
+  /* ============ Real persistence (Phase 1) ============
+     Companies/personas/decisions/goals now live server-side in Postgres
+     (see persistence.py, mounted at /api/v2). Everything else — chat
+     threads, Vantage gaps/plans, handoffs, the access ledger — still lives
+     only in this tab, exactly as before this phase. Every write below
+     follows "optimistic local update, fire-and-forget persistence call":
+     the UI never waits on the network for something the user already sees
+     happen locally, and if the call fails (offline, DB unreachable) local
+     state is still correct — it just won't survive a reload. Same
+     graceful-degradation pattern already used for Ask Cognex, Complete the
+     Story, and Vantage. */
+  function apiV2(method, path, body) {
+    return fetch("/api/v2" + path, {
+      method: method,
+      headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (e) {
+          throw new Error(e.detail || ("request failed (" + res.status + ")"));
+        });
+      }
+      return res.json();
+    });
+  }
+  function persistFireAndForget(promise) {
+    if (promise && promise.catch) promise.catch(function (err) { console.warn("[cognex] persistence call failed:", err && err.message ? err.message : err); });
+  }
+  function serverCompanyToLocal(sc) {
+    // Converts an /api/v2 company snapshot into the shape the rest of this
+    // file already expects, adding back the fields that are still
+    // session-only (not modeled server-side yet — see persistence.py).
+    var existing = COMPANIES[sc.id];
+    return {
+      id: sc.id, name: sc.name, industry: sc.industry, seeded: sc.seeded,
+      personas: sc.personas || {}, decisions: sc.decisions || [], goals: sc.goals || [],
+      stories: (existing && existing.stories) || {},
+      memberCounter: (existing && existing.memberCounter) || Object.keys(sc.personas || {}).length,
+      handoffs: (existing && existing.handoffs) || [],
+      accessLedger: (existing && existing.accessLedger) || [],
+      vantageGaps: (existing && existing.vantageGaps) || [],
+      vantagePlans: (existing && existing.vantagePlans) || [],
+    };
+  }
+  function loadCompanyFromServer(companyId) {
+    return apiV2("GET", "/companies/" + encodeURIComponent(companyId)).then(function (sc) {
+      COMPANIES[companyId] = serverCompanyToLocal(sc);
+      return COMPANIES[companyId];
+    });
+  }
+  function persistNewDecision(company, d) {
+    persistFireAndForget(apiV2("POST", "/companies/" + company.id + "/decisions", {
+      id: d.id, title: d.title, decided: d.decided, owner: d.owner,
+      visibility: d.visibility, derivedLevel: d.derivedLevel,
+      why: d.why || [], alternatives: d.alternatives || [], assumptions: d.assumptions || [], risks: d.risks || [],
+      review: d.review, result: d.result, tags: d.tags || [], derived: d.derived,
+      contributor: d.contributor || null,
+      viaStory: !!d.viaStory, viaSlack: !!d.viaSlack, viaChat: !!d.viaChat, viaVantage: !!d.viaVantage,
+    }));
+  }
+
   var COMPANIES = {};
   COMPANIES["cognex-labs"] = seedCognexLabs();
+  // Instant local seed renders immediately (no loading flash); this silently
+  // upgrades it to the real persisted copy from Postgres once it's back,
+  // re-rendering only if the upgraded company is the one currently on screen.
+  loadCompanyFromServer("cognex-labs").then(function () {
+    if (session.type === "company" && session.companyId === "cognex-labs") renderApp();
+  }).catch(function () { /* offline — the hardcoded seed stays as-is */ });
   var storyCounter = 0;
   var slackCounter = 0;
 
   /* ============ Session ============ */
   var session = { type: null }; // null | {type:'company', companyId, personaId, viaSupport} | {type:'platform'}
-  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null };
+  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, platformCompanies: null };
 
   function currentCompany() {
     if (session.type === "company") return COMPANIES[session.companyId];
@@ -1204,6 +1271,7 @@
     if (outcome === null) return;
     if (!outcome.trim()) { alert("Enter an outcome to log it, or Cancel."); return; }
     d.result = outcome.trim();
+    persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/decisions/" + encodeURIComponent(d.id), { result: d.result }));
     renderApp();
   }
 
@@ -1446,7 +1514,7 @@
       if (gap) gap.status = "resolved";
       var dateStr = new Date().toISOString().slice(0, 10);
       vantageItemCounter += 1;
-      company.decisions.unshift({
+      var newDecision = {
         id: "d-vantage-" + company.id + "-" + vantageItemCounter,
         title: plan.title,
         decided: dateStr, owner: plan.ownerName + (plan.ownerDept ? " · " + plan.ownerDept : ""),
@@ -1457,7 +1525,9 @@
         tags: tokenize(plan.title).slice(0, 6).concat([(plan.ownerDept || "").toLowerCase()]),
         derived: plan.title + " — a plan raised through Vantage was completed.",
         viaVantage: true,
-      });
+      };
+      company.decisions.unshift(newDecision);
+      persistNewDecision(company, newDecision);
       renderVantage();
       renderDecisions();
       return;
@@ -1872,15 +1942,47 @@
       var email = document.getElementById("login-email").value;
       var password = document.getElementById("login-password").value;
       if (!email || !password) { ui.loginError = "Enter both an email and a password."; renderShell(); return; }
-      if (email.trim().toLowerCase() === "admin@cognex.ai") {
-        if (password !== DEMO_PASSWORD) { ui.loginError = "Incorrect password for Cognex staff. Demo password is " + DEMO_PASSWORD + "."; renderShell(); return; }
-        ui.loginError = ""; session = { type: "platform" }; renderShell(); return;
+
+      function loginLocally() {
+        if (email.trim().toLowerCase() === "admin@cognex.ai") {
+          if (password !== DEMO_PASSWORD) { ui.loginError = "Incorrect password for Cognex staff. Demo password is " + DEMO_PASSWORD + "."; renderShell(); return; }
+          ui.loginError = ""; session = { type: "platform" }; renderShell(); return;
+        }
+        var found = findAccountByEmail(email);
+        if (!found || password !== DEMO_PASSWORD) { ui.loginError = "No matching account, or the password's wrong. Demo password is " + DEMO_PASSWORD + " for every account."; renderShell(); return; }
+        ui.loginError = "";
+        session = { type: "company", companyId: found.company.id, personaId: found.persona.id };
+        renderShell();
       }
-      var found = findAccountByEmail(email);
-      if (!found || password !== DEMO_PASSWORD) { ui.loginError = "No matching account, or the password's wrong. Demo password is " + DEMO_PASSWORD + " for every account."; renderShell(); return; }
-      ui.loginError = "";
-      session = { type: "company", companyId: found.company.id, personaId: found.persona.id };
-      renderShell();
+
+      // Try the real backend first — it's the source of truth for accounts
+      // created after this tab loaded (e.g. onboarded by staff elsewhere).
+      // A denial FROM the server (401 — real account, wrong password, or no
+      // such account) is authoritative and shown as-is. Only when the server
+      // itself is unreachable (offline / DB down) do we fall back to the
+      // local-only lookup, matching this app's established
+      // graceful-degradation pattern.
+      fetch("/api/v2/login", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password: password }),
+      }).then(function (res) {
+        if (res.status === 401) {
+          return res.json().catch(function () { return {}; }).then(function (e) {
+            throw { authoritative: true, message: e.detail || "No matching account, or the password's wrong." };
+          });
+        }
+        if (!res.ok) throw { authoritative: false };
+        return res.json();
+      }).then(function (result) {
+        ui.loginError = "";
+        if (result.type === "platform") { session = { type: "platform" }; renderShell(); return; }
+        COMPANIES[result.companyId] = serverCompanyToLocal(result.company);
+        session = { type: "company", companyId: result.companyId, personaId: result.personaId };
+        renderShell();
+      }).catch(function (err) {
+        if (err && err.authoritative) { ui.loginError = err.message; renderShell(); return; }
+        loginLocally();
+      });
     });
 
     document.querySelectorAll("[data-quick]").forEach(function (btn) {
@@ -1960,29 +2062,60 @@
       var title = document.getElementById("wiz-title").value.trim() || "CEO";
       var email = document.getElementById("wiz-email").value.trim();
       if (!name || !email) return;
-      var existing = findAccountByEmail(email);
-      if (existing) { ui.loginError = "That email is already in use by another account."; renderShell(); return; }
-      ui.loginError = "";
 
-      var companyId = slugify(w.data.companyName);
-      var color = AVATAR_COLORS[0];
-      var founderId = "founder";
-      var company = {
-        id: companyId, name: w.data.companyName, industry: w.data.industry || "—", seeded: false,
-        personas: {}, decisions: [],
-        goals: [{ id: "g-root", depth: 0, kicker: "Company goal", title: "Define your first company goal", parent: null, dept: null }],
-        stories: {}, memberCounter: 0,
-        handoffs: [], accessLedger: [], vantageGaps: [], vantagePlans: [],
-      };
-      company.personas[founderId] = {
-        id: founderId, name: name, title: title, level: LEVEL.ceo, dept: "Executive", email: email,
-        reportsTo: null, isOrgAdmin: true, initials: initialsOf(name), bg: color.bg, fg: color.fg,
-      };
-      COMPANIES[companyId] = company;
+      function createLocally() {
+        var existing = findAccountByEmail(email);
+        if (existing) { ui.loginError = "That email is already in use by another account."; renderShell(); return; }
+        ui.loginError = "";
 
-      ui.wizard = null;
-      ui.platformNotice = { companyId: companyId, founderEmail: email };
-      renderShell();
+        var companyId = slugify(w.data.companyName);
+        var color = AVATAR_COLORS[0];
+        var founderId = "founder";
+        var company = {
+          id: companyId, name: w.data.companyName, industry: w.data.industry || "—", seeded: false,
+          personas: {}, decisions: [],
+          goals: [{ id: "g-root", depth: 0, kicker: "Company goal", title: "Define your first company goal", parent: null, dept: null }],
+          stories: {}, memberCounter: 0,
+          handoffs: [], accessLedger: [], vantageGaps: [], vantagePlans: [],
+        };
+        company.personas[founderId] = {
+          id: founderId, name: name, title: title, level: LEVEL.ceo, dept: "Executive", email: email,
+          reportsTo: null, isOrgAdmin: true, initials: initialsOf(name), bg: color.bg, fg: color.fg,
+        };
+        COMPANIES[companyId] = company;
+
+        ui.wizard = null;
+        ui.platformNotice = { companyId: companyId, founderEmail: email };
+        renderShell();
+      }
+
+      // Create it for real (Postgres) so it survives a reload / redeploy and
+      // shows up for every session, not just this tab. Falls back to a
+      // local-only company (as before this phase) if the backend can't be
+      // reached — a 409 (email already in use) is authoritative and shown
+      // as-is rather than falling back.
+      fetch("/api/v2/companies", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: w.data.companyName, industry: w.data.industry || "—", founder: { name: name, title: title, email: email } }),
+      }).then(function (res) {
+        if (res.status === 409) {
+          return res.json().catch(function () { return {}; }).then(function (e) {
+            throw { authoritative: true, message: e.detail || "That email is already in use by another account." };
+          });
+        }
+        if (!res.ok) throw { authoritative: false };
+        return res.json();
+      }).then(function (sc) {
+        ui.loginError = "";
+        COMPANIES[sc.id] = serverCompanyToLocal(sc);
+        ui.platformCompanies = null; // refetch the staff console listing to include this company
+        ui.wizard = null;
+        ui.platformNotice = { companyId: sc.id, founderEmail: email };
+        renderShell();
+      }).catch(function (err) {
+        if (err && err.authoritative) { ui.loginError = err.message; renderShell(); return; }
+        createLocally();
+      });
     });
   }
   function slugPreview(name) { return (name || "yourcompany").toLowerCase().replace(/[^a-z0-9]+/g, "") || "yourcompany"; }
@@ -1992,22 +2125,38 @@
   ===================================================================== */
   function renderPlatform() {
     var body = document.getElementById("platform-body");
-    var ids = Object.keys(COMPANIES);
+
+    // The real, cross-session company list (every org that actually exists in
+    // Postgres, not just the ones cached in this tab). Renders instantly from
+    // whatever's cached locally, then fetches the real list once and
+    // re-renders — offline, it just keeps showing the local-only listing.
+    var rows;
+    if (ui.platformCompanies) {
+      rows = ui.platformCompanies;
+    } else {
+      rows = Object.keys(COMPANIES).map(function (id) {
+        var c = COMPANIES[id];
+        return { id: id, name: c.name, industry: c.industry, seeded: c.seeded, memberCount: Object.keys(c.personas).length, adminCount: countAdmins(c) };
+      });
+      apiV2("GET", "/platform/companies").then(function (data) {
+        ui.platformCompanies = data.companies;
+        if (session.type === "platform") renderPlatform();
+      }).catch(function () { /* offline — keep the local-only listing */ });
+    }
+
     var notice = "";
     if (ui.platformNotice) {
       var nc = COMPANIES[ui.platformNotice.companyId];
       notice = '<div class="success-note">✓ ' + esc(nc.name) + " created. Founding team admin: " + esc(ui.platformNotice.founderEmail) + " (password: " + DEMO_PASSWORD + ")</div>";
     }
-    var rows = ids.map(function (id) {
-      var c = COMPANIES[id];
-      var count = Object.keys(c.personas).length;
-      var admins = countAdmins(c);
+    var rowsHtml = rows.map(function (c) {
+      var count = c.memberCount, admins = c.adminCount;
       return "<tr>" +
         '<td><div class="companies-name"><div class="avatar sm" style="background:var(--accent-soft);color:var(--accent-ink)">' + esc(initialsOf(c.name)) + '</div><div><div style="font-weight:600">' + esc(c.name) + '</div><div style="font-size:11.5px;color:var(--ink-faint)">' + esc(c.industry) + "</div></div></div></td>" +
         "<td>" + count + " member" + (count === 1 ? "" : "s") + "</td>" +
         "<td>" + admins + " team admin" + (admins === 1 ? "" : "s") + "</td>" +
         "<td>" + (c.seeded ? "Seed data" : "Onboarded this session") + "</td>" +
-        '<td><button class="btn-secondary" data-enter="' + esc(id) + '">Enter as support</button></td>' +
+        '<td><button class="btn-secondary" data-enter="' + esc(c.id) + '">Enter as support</button></td>' +
         "</tr>";
     }).join("");
 
@@ -2018,7 +2167,7 @@
       '<button class="btn-primary" id="platform-onboard">+ Onboard a new company</button>' +
       "</div>" +
       '<div class="panel panel-pad"><div class="roster-table-wrap"><table class="roster-table companies-table"><thead><tr><th>Company</th><th>Members</th><th>Team admins</th><th>Status</th><th></th></tr></thead><tbody>' +
-      rows + "</tbody></table></div></div>";
+      rowsHtml + "</tbody></table></div></div>";
 
     document.getElementById("platform-onboard").addEventListener("click", function () {
       ui.platformNotice = null;
@@ -2028,10 +2177,15 @@
     document.querySelectorAll("[data-enter]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var companyId = btn.getAttribute("data-enter");
-        var c = COMPANIES[companyId];
-        var adminId = Object.keys(c.personas).filter(function (id) { return c.personas[id].isOrgAdmin; })[0] || Object.keys(c.personas)[0];
-        session = { type: "company", companyId: companyId, personaId: adminId, viaSupport: true };
-        renderShell();
+        function enter() {
+          var c = COMPANIES[companyId];
+          if (!c) { alert("Couldn't load that company right now — try again once you're back online."); return; }
+          var adminId = Object.keys(c.personas).filter(function (id) { return c.personas[id].isOrgAdmin; })[0] || Object.keys(c.personas)[0];
+          session = { type: "company", companyId: companyId, personaId: adminId, viaSupport: true };
+          renderShell();
+        }
+        if (COMPANIES[companyId] && COMPANIES[companyId].personas && Object.keys(COMPANIES[companyId].personas).length) { enter(); return; }
+        loadCompanyFromServer(companyId).then(enter).catch(enter);
       });
     });
 
@@ -2252,7 +2406,7 @@
     var dateStr = new Date().toISOString().slice(0, 10);
     storyCounter += 1;
     var bodyText = plainTextOf(turn);
-    company.decisions.unshift({
+    var newDecision = {
       id: "d-chat-" + company.id + "-" + p.id + "-" + storyCounter,
       title: turn.q.length > 80 ? turn.q.slice(0, 80) + "…" : turn.q,
       decided: dateStr, owner: p.name + " · " + p.title,
@@ -2262,7 +2416,9 @@
       tags: tokenize(turn.q).slice(0, 6).concat([(p.dept || "").toLowerCase()]),
       derived: turn.q + " — context captured directly from " + p.name + "'s conversation with Cognex.",
       viaChat: true,
-    });
+    };
+    company.decisions.unshift(newDecision);
+    persistNewDecision(company, newDecision);
     turn.savedToMemory = true;
     renderChatLog();
     renderDecisions();
@@ -2531,7 +2687,7 @@
     var draft = ss.draft || { why: [ss.answers.why || ""], risks: [ss.answers.risk || ""], contributor_note: ss.answers.who || "", suggested_tags: [] };
     var dateStr = new Date().toISOString().slice(0, 10);
     storyCounter += 1;
-    company.decisions.unshift({
+    var newDecision = {
       id: "d-story-" + company.id + "-" + p.id + "-" + storyCounter,
       title: story.workItem, decided: dateStr, owner: p.name + " · " + p.title,
       visibility: LEVEL.intern, derivedLevel: LEVEL.intern,
@@ -2542,7 +2698,9 @@
       tags: ((draft.suggested_tags && draft.suggested_tags.length) ? draft.suggested_tags : tokenize(story.workItem)).concat([(p.dept || "").toLowerCase()]),
       derived: story.workItem + " — context captured directly from " + p.name + ".",
       contributor: draft.contributor_note || ss.answers.who || "", viaStory: true,
-    });
+    };
+    company.decisions.unshift(newDecision);
+    persistNewDecision(company, newDecision);
     ss.saved = true;
     state.tab = "story";
     renderApp();
@@ -2641,7 +2799,7 @@
       .then(function (row) {
         var dateStr = new Date().toISOString().slice(0, 10);
         slackCounter += 1;
-        company.decisions.unshift({
+        var newDecision = {
           id: "d-slack-" + company.id + "-" + slackCounter,
           title: row.title, decided: dateStr, owner: "#" + row.channel_name + " (Slack)",
           visibility: visibility, derivedLevel: visibility,
@@ -2654,7 +2812,9 @@
           tags: tokenize(row.title).concat(["slack"]),
           derived: row.title + " — captured automatically from a Slack conversation in #" + row.channel_name + ".",
           contributor: "", viaSlack: true,
-        });
+        };
+        company.decisions.unshift(newDecision);
+        persistNewDecision(company, newDecision);
         slackLoadCandidates();
         renderApp();
       });
@@ -2844,12 +3004,18 @@
       if (editing) {
         if (!isAdmin && editing.isOrgAdmin && countAdmins(company) <= 1) { alert("You can't remove the last team admin. Promote someone else first."); return; }
         Object.assign(editing, { name: name, title: title, dept: dept, level: level, email: email, reportsTo: reportsTo, isOrgAdmin: isAdmin, initials: initialsOf(name) });
+        persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/personas/" + encodeURIComponent(editing.id), {
+          id: editing.id, name: name, title: title, level: level, dept: dept, email: email, reportsTo: reportsTo, isOrgAdmin: isAdmin,
+        }));
         ui.editingMemberId = null;
       } else {
         company.memberCounter += 1;
         var id = "m" + company.memberCounter;
         var color = AVATAR_COLORS[Object.keys(company.personas).length % AVATAR_COLORS.length];
         company.personas[id] = { id: id, name: name, title: title, dept: dept, level: level, email: email, reportsTo: reportsTo, isOrgAdmin: isAdmin, initials: initialsOf(name), bg: color.bg, fg: color.fg };
+        persistFireAndForget(apiV2("POST", "/companies/" + company.id + "/personas", {
+          id: id, name: name, title: title, level: level, dept: dept, email: email, reportsTo: reportsTo, isOrgAdmin: isAdmin,
+        }));
       }
       renderApp();
     });
@@ -2868,6 +3034,7 @@
         if (target.isOrgAdmin && countAdmins(company) <= 1) { alert("You can't remove the last team admin. Promote someone else first."); return; }
         if (!confirm("Remove " + target.name + " from " + company.name + "?")) return;
         delete company.personas[id];
+        persistFireAndForget(apiV2("DELETE", "/companies/" + company.id + "/personas/" + encodeURIComponent(id) + "?acting_persona_id=" + encodeURIComponent(session.personaId)));
         renderApp();
       });
     });
@@ -3070,7 +3237,10 @@
     if (!candidateId) return;
     var company = currentCompany();
     var g = company.goals.filter(function (x) { return x.id === goalId; })[0];
-    if (g) g.owner = candidateId;
+    if (g) {
+      g.owner = candidateId;
+      persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/goals/" + encodeURIComponent(g.id), { owner: candidateId }));
+    }
     renderApp();
   }
   function assignDelegationItem(handoffId, index, candidateId) {
