@@ -103,6 +103,13 @@
   .badge-story { background: var(--purple-soft); color: var(--purple); }
   .badge-admin { background: var(--purple-soft); color: var(--purple); }
   .badge-slack { background: var(--green-soft); color: var(--green); }
+  .badge-chat { background: var(--accent-soft); color: var(--accent-ink); }
+
+  /* Save-to-memory action on a chat answer */
+  .msg-actions { margin-top: 11px; }
+  .msg-save-btn { border: 1px solid var(--border); background: var(--surface); color: var(--ink-soft); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 500; cursor: pointer; }
+  .msg-save-btn:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .msg-saved { font-size: 12px; color: var(--green); font-weight: 500; }
 
   /* ============ Integrations (Admin tab) ============ */
   .integration-card { border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
@@ -134,13 +141,46 @@
   .btn-danger:hover { background: #ffdbd3; }
   .btn-block { width: 100%; }
 
-  /* ============ Workspace layout ============ */
-  .workspace-band { background: var(--bg-soft); border-top: 1px solid var(--border-soft); }
-  .workspace { padding: 40px 0 88px; display: grid; grid-template-columns: 264px 1fr; gap: 22px; align-items: start; }
-  @media (max-width: 860px) { .workspace { grid-template-columns: 1fr; } }
-  .panel { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 16px; box-shadow: var(--shadow-sm); }
-  .sidebar { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 16px; }
-  @media (max-width: 860px) { .sidebar { position: static; } }
+  /* ============ App shell — sidebar + chat layout, familiar to anyone who's used Claude or ChatGPT ============ */
+  #app-shell { height: 100vh; display: flex; flex-direction: column; }
+  .app-shell-flex { flex: 1; min-height: 0; display: flex; }
+  @media (max-width: 860px) { .app-shell-flex { flex-direction: column; } }
+
+  .nav-rail { width: 272px; flex: none; background: var(--bg-soft); border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; overflow-y: auto; }
+  @media (max-width: 860px) { .nav-rail { width: 100%; max-height: 44vh; border-right: none; border-bottom: 1px solid var(--border-soft); } }
+  .nav-brand { padding: 18px 16px 2px; }
+  .nav-brand-mark { font-weight: 600; font-size: 17px; letter-spacing: -0.02em; }
+  .nav-brand-tag { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
+  .nav-newchat-btn { display: flex; align-items: center; gap: 8px; margin: 14px 12px 6px; padding: 9px 13px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); font-size: 13.5px; font-weight: 590; cursor: pointer; color: var(--ink); }
+  .nav-newchat-btn:hover { border-color: var(--ink-faint); background: var(--surface-2); }
+  .nav-newchat-btn .plus { font-size: 15px; line-height: 1; }
+  .nav-section-label { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); padding: 14px 16px 6px; }
+  .nav-threads { display: flex; flex-direction: column; gap: 1px; padding: 0 8px; max-height: 240px; overflow-y: auto; }
+  .nav-thread-row { display: flex; align-items: center; gap: 4px; width: 100%; padding: 1px; border-radius: 8px; cursor: pointer; color: var(--ink-soft); }
+  .nav-thread-row:hover { background: var(--surface-2); }
+  .nav-thread-row.active { background: var(--surface-3); color: var(--ink); }
+  .nav-thread-row .tt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 7px 4px 7px 8px; font-size: 13px; font-weight: 500; }
+  .nav-thread-row.active .tt { font-weight: 600; }
+  .nav-thread-del { opacity: 0; border: none; background: transparent; color: var(--ink-faint); font-size: 12px; cursor: pointer; padding: 4px 7px; border-radius: 6px; flex: none; }
+  .nav-thread-row:hover .nav-thread-del { opacity: 1; }
+  .nav-thread-del:hover { color: var(--red); background: var(--red-soft); }
+  .nav-workspace { display: flex; flex-direction: column; gap: 1px; padding: 0 8px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: none; background: transparent; padding: 8px 8px; border-radius: 8px; cursor: pointer; color: var(--ink-soft); font-size: 13.5px; font-weight: 500; }
+  .nav-item:hover { background: var(--surface-2); color: var(--ink); }
+  .nav-item.active { background: var(--surface-3); color: var(--ink); font-weight: 600; }
+  .nav-item .ic { font-size: 14px; width: 16px; text-align: center; flex: none; }
+  .nav-spacer { flex: 1; min-height: 10px; }
+  .nav-demo { border-top: 1px solid var(--border-soft); padding-top: 2px; margin-top: 6px; }
+  .nav-demo summary { list-style: none; cursor: pointer; padding: 12px 16px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); display: flex; align-items: center; justify-content: space-between; }
+  .nav-demo summary::-webkit-details-marker { display: none; }
+  .nav-demo summary::after { content: "▾"; font-size: 10px; }
+  .nav-demo[open] summary::after { content: "▴"; }
+  .nav-demo .persona-list { max-height: 200px; }
+  .nav-footer { border-top: 1px solid var(--border-soft); padding: 10px 12px 12px; display: flex; align-items: center; gap: 8px; }
+  .nav-footer-who { flex: 1; min-width: 0; }
+  .nav-footer-who .wn { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nav-footer-who .wc { font-size: 11px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
   .sidebar-head { padding: 14px 16px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink-faint); }
   .persona-list { list-style: none; margin: 0; padding: 8px; display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
   .persona-btn { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 9px; border-radius: 10px; border: none; background: transparent; cursor: pointer; color: var(--ink); }
@@ -155,33 +195,44 @@
   .legend-title { font-size: 11.5px; font-weight: 600; color: var(--ink-faint); margin-bottom: 9px; text-transform: uppercase; letter-spacing: .02em; }
   .legend-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-soft); padding: 4px 0; }
   .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .viewing-as { padding: 16px 16px 12px; }
+  .viewing-as { padding: 4px 16px 12px; }
   .viewing-as .label { font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 10px; }
   .viewing-as .who { display: flex; align-items: center; gap: 10px; }
   .viewing-as .who .n { font-weight: 600; font-size: 14.5px; }
   .viewing-as .who .t { font-size: 12.5px; color: var(--ink-faint); }
   .sidebar-note { font-size: 11px; color: var(--ink-faint); padding: 0 16px 14px; line-height: 1.5; }
 
-  /* Main */
-  .main { min-width: 0; }
-  .tabs { display: flex; gap: 2px; padding: 4px; background: var(--surface-3); border-radius: 980px; margin-bottom: 18px; width: fit-content; max-width: 100%; overflow-x: auto; }
-  .tab-btn { border: none; background: transparent; cursor: pointer; padding: 8px 16px; border-radius: 980px; font-size: 13.5px; font-weight: 500; color: var(--ink-soft); white-space: nowrap; }
-  .tab-btn.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); font-weight: 600; }
+  /* Main pane */
+  .panel { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 16px; box-shadow: var(--shadow-sm); }
+  .main-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .main-scroll { flex: 1; overflow-y: auto; }
+  .content-wrap { max-width: 900px; margin: 0 auto; padding: 28px 28px 60px; }
   .panel-pad { padding: 24px; }
-  @media (max-width: 640px) { .panel-pad { padding: 18px; } }
+  @media (max-width: 640px) { .panel-pad { padding: 18px; } .content-wrap { padding: 20px 16px 48px; } }
 
-  /* Ask tab */
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  /* Ask Cognex — chat pane, docked composer, like a familiar AI chat window */
+  .chat-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .chat-scroll { flex: 1; overflow-y: auto; }
+  .chat-inner { max-width: 720px; margin: 0 auto; padding: 28px 24px 16px; }
+  .chat-welcome { padding: 40px 4px 8px; }
+  .chat-welcome h2 { font-size: 22px; letter-spacing: -0.02em; margin-bottom: 6px; }
+  .chat-welcome p { font-size: 14px; color: var(--ink-soft); margin: 0 0 20px; }
+  .composer-dock { border-top: 1px solid var(--border-soft); background: var(--bg); padding: 12px 24px 20px; }
+  .composer-inner { max-width: 720px; margin: 0 auto; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
   .chip { border: none; background: var(--surface-2); color: var(--ink-soft); border-radius: 999px; padding: 8px 14px; font-size: 12.5px; font-weight: 500; cursor: pointer; }
   .chip:hover { background: var(--surface-3); color: var(--ink); }
-  .composer { display: flex; gap: 8px; margin-bottom: 22px; }
-  .composer input { flex: 1; border: 1px solid var(--border); background: var(--bg); color: var(--ink); border-radius: 12px; padding: 12px 15px; font-size: 14.5px; font-family: inherit; }
-  .composer input:focus { border-color: var(--accent); }
+  .composer { display: flex; align-items: center; gap: 8px; margin-top: 14px; border: 1px solid var(--border); background: var(--bg); border-radius: 26px; padding: 6px 6px 6px 18px; }
+  .composer:focus-within { border-color: var(--accent); }
+  .composer input { flex: 1; border: none; background: transparent; color: var(--ink); padding: 8px 0; font-size: 14.5px; font-family: inherit; }
+  .composer input:focus { outline: none; }
   .composer input::placeholder { color: var(--ink-faint); }
-  .chat-log { display: flex; flex-direction: column; gap: 18px; }
-  .msg-user { align-self: flex-end; background: var(--accent); color: #fff; padding: 10px 15px; border-radius: 18px 18px 4px 18px; font-size: 14.5px; max-width: 72%; }
+  .composer-send { flex: none; width: 34px; height: 34px; border-radius: 50%; border: none; background: var(--ink); color: #fff; font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .composer-send:hover { background: #3a3a3c; }
+  .chat-log { display: flex; flex-direction: column; gap: 22px; }
+  .msg-user { align-self: flex-end; background: var(--surface-3); color: var(--ink); padding: 10px 15px; border-radius: 18px 18px 4px 18px; font-size: 14.5px; max-width: 80%; }
   .msg-block { display: flex; flex-direction: column; gap: 10px; }
-  .msg-cognex { background: var(--surface-2); border-radius: 4px 18px 18px 18px; padding: 15px 17px; max-width: 86%; }
+  .msg-cognex { padding: 0 2px; max-width: 100%; }
   .msg-cognex .who { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
   .msg-cognex .who .name { font-weight: 600; font-size: 12.5px; }
   .msg-cognex .body { font-size: 14.5px; color: var(--ink); }
@@ -425,110 +476,122 @@
   <div class="wrap platform-wrap" id="platform-body"></div>
 </div>
 
-<!-- ============ Main app shell ============ -->
+<!-- ============ Main app shell — sidebar + chat, like Claude or ChatGPT ============ -->
 <div id="app-shell" style="display:none">
-  <div class="topbar">
-    <div class="wrap topbar-inner">
-      <div class="wordmark">
-        <span class="mark">Cognex</span>
-        <span class="tag" id="company-tag">Company memory</span>
+  <div class="app-shell-flex">
+    <nav class="nav-rail">
+      <div class="nav-brand">
+        <div class="nav-brand-mark">Cognex</div>
+        <div class="nav-brand-tag" id="company-tag">Company memory</div>
       </div>
-      <div class="topbar-user">
-        <div class="whoami">
+
+      <button class="nav-newchat-btn" id="nav-newchat-btn"><span class="plus">+</span> New chat</button>
+      <div class="nav-section-label">Chats</div>
+      <div class="nav-threads" id="nav-threads"></div>
+
+      <div class="nav-section-label">Workspace</div>
+      <div class="nav-workspace" id="tabs">
+        <button class="tab-btn nav-item" data-tab="decisions"><span class="ic">🗂</span> Decision Memory</button>
+        <button class="tab-btn nav-item" data-tab="goals"><span class="ic">🎯</span> Goal Alignment</button>
+        <button class="tab-btn nav-item" data-tab="story"><span class="ic">✍️</span> Complete the Story</button>
+        <button class="tab-btn nav-item" data-tab="tree"><span class="ic">🌳</span> Company Tree</button>
+        <button class="tab-btn nav-item" data-tab="handoffs" id="handoffs-tab-btn" style="display:none"><span class="ic">🔁</span> Handoffs</button>
+        <button class="tab-btn nav-item" data-tab="admin" id="admin-tab-btn" style="display:none"><span class="ic">⚙️</span> Admin</button>
+      </div>
+
+      <div class="nav-spacer"></div>
+
+      <details class="nav-demo" open>
+        <summary>Demo: preview as</summary>
+        <div class="viewing-as">
+          <div class="label">Viewing memory as</div>
+          <div class="who">
+            <div class="avatar" id="current-avatar"></div>
+            <div>
+              <div class="n" id="current-name"></div>
+              <div class="t" id="current-title"></div>
+            </div>
+          </div>
+        </div>
+        <ul class="persona-list" id="persona-list"></ul>
+        <div class="sidebar-note">In production you'd only ever be signed in as yourself — this switcher exists so you can preview every role in one browser session.</div>
+        <div style="padding:0 16px 14px"><button class="link-btn" id="leave-company-btn" style="font-size:11.5px">Leaving the company? Start a handoff →</button></div>
+        <div class="legend">
+          <div class="legend-title">Clearance, low to high</div>
+          <div class="legend-row"><span class="legend-dot" style="background:var(--ink-faint)"></span> Intern → Employee → Manager</div>
+          <div class="legend-row"><span class="legend-dot" style="background:var(--accent)"></span> Director → Executive → CEO</div>
+          <div class="legend-row" style="margin-top:8px"><span class="badge badge-source">Source</span> full record visible</div>
+          <div class="legend-row"><span class="badge badge-derived">Derived</span> outcome only, source hidden</div>
+        </div>
+        <div class="sidebar-note">Prototype for internal review — org, decisions, goals and accounts live in this browser session and reset on reload. Sign-in is demo-only. “Ask Cognex” and “Complete the Story” call a real Claude model server-side, with permission filtering enforced before anything is sent to it; if the server's ANTHROPIC_API_KEY is unavailable, those fall back to a local rule-based engine and say so.</div>
+      </details>
+
+      <div class="nav-footer">
+        <div class="nav-footer-who">
           <div class="wn" id="topbar-name"></div>
           <div class="wc" id="topbar-company"></div>
         </div>
         <button class="btn-secondary" id="app-logout">Log out</button>
       </div>
-    </div>
-  </div>
+    </nav>
 
-  <div id="support-banner" style="display:none">
-    <div class="wrap" style="padding-top:12px">
-      <div class="admin-banner" style="margin-bottom:0">
-        <span>🛟 You're signed in as Cognex staff, viewing this company for support.</span>
-        <button class="btn-secondary" id="exit-support">Exit to staff console</button>
+    <div class="main-pane">
+      <div id="support-banner" style="display:none">
+        <div class="admin-banner" style="margin:12px 16px 0">
+          <span>🛟 You're signed in as Cognex staff, viewing this company for support.</span>
+          <button class="btn-secondary" id="exit-support">Exit to staff console</button>
+        </div>
       </div>
-    </div>
-  </div>
 
-  <div class="workspace-band">
-    <div class="wrap workspace">
-      <div class="sidebar">
-        <div class="panel">
-          <div class="viewing-as">
-            <div class="label">Viewing memory as</div>
-            <div class="who">
-              <div class="avatar" id="current-avatar"></div>
-              <div>
-                <div class="n" id="current-name"></div>
-                <div class="t" id="current-title"></div>
-              </div>
+      <div class="chat-pane" id="tab-ask">
+        <div class="chat-scroll" id="chat-scroll">
+          <div class="chat-inner">
+            <div class="chat-log" id="chat-log"></div>
+          </div>
+        </div>
+        <div class="composer-dock">
+          <div class="composer-inner">
+            <div class="chips" id="ask-chips"></div>
+            <div class="composer">
+              <input type="text" id="ask-input" placeholder="Ask anything — try “why did we decide not to enter Germany?”" />
+              <button id="ask-send" class="composer-send" aria-label="Send">➤</button>
             </div>
           </div>
-          <div class="sidebar-head">Demo: preview as</div>
-          <ul class="persona-list" id="persona-list"></ul>
-          <div class="sidebar-note">In production you'd only ever be signed in as yourself — this switcher exists so you can preview every role in one browser session.</div>
-          <div style="padding:0 16px 14px"><button class="link-btn" id="leave-company-btn" style="font-size:11.5px">Leaving the company? Start a handoff →</button></div>
-          <div class="legend">
-            <div class="legend-title">Clearance, low to high</div>
-            <div class="legend-row"><span class="legend-dot" style="background:var(--ink-faint)"></span> Intern → Employee → Manager</div>
-            <div class="legend-row"><span class="legend-dot" style="background:var(--accent)"></span> Director → Executive → CEO</div>
-            <div class="legend-row" style="margin-top:8px"><span class="badge badge-source">Source</span> full record visible</div>
-            <div class="legend-row"><span class="badge badge-derived">Derived</span> outcome only, source hidden</div>
-          </div>
         </div>
       </div>
 
-      <div class="main">
-        <div class="tabs" id="tabs">
-          <button class="tab-btn" data-tab="ask">Ask Cognex</button>
-          <button class="tab-btn" data-tab="decisions">Decision Memory</button>
-          <button class="tab-btn" data-tab="goals">Goal Alignment</button>
-          <button class="tab-btn" data-tab="story">Complete the Story</button>
-          <button class="tab-btn" data-tab="tree">Company Tree</button>
-          <button class="tab-btn" data-tab="handoffs" id="handoffs-tab-btn" style="display:none">Handoffs</button>
-          <button class="tab-btn" data-tab="admin" id="admin-tab-btn" style="display:none">Admin</button>
-        </div>
-
-        <div class="panel panel-pad" id="tab-ask">
-          <div class="chips" id="ask-chips"></div>
-          <div class="composer">
-            <input type="text" id="ask-input" placeholder="Ask anything — try “why did we decide not to enter Germany?”" />
-            <button id="ask-send" class="btn-primary">Ask</button>
+      <div class="main-scroll" id="main-scroll">
+        <div class="content-wrap">
+          <div class="panel panel-pad" id="tab-decisions" style="display:none">
+            <div id="decisions-banner"></div>
+            <div class="decisions-grid" id="decisions-grid"></div>
           </div>
-          <div class="chat-log" id="chat-log"></div>
-        </div>
 
-        <div class="panel panel-pad" id="tab-decisions" style="display:none">
-          <div id="decisions-banner"></div>
-          <div class="decisions-grid" id="decisions-grid"></div>
-        </div>
-
-        <div class="panel panel-pad" id="tab-handoffs" style="display:none">
-          <div id="handoffs-root"></div>
-        </div>
-
-        <div class="panel panel-pad" id="tab-goals" style="display:none">
-          <div id="goals-trace"></div>
-          <div class="goal-col-title">Company goal → department → team → individual work</div>
-          <div class="goal-tree" id="goal-tree"></div>
-        </div>
-
-        <div class="panel panel-pad" id="tab-story" style="display:none">
-          <div id="story-root"></div>
-        </div>
-
-        <div class="panel panel-pad" id="tab-tree" style="display:none">
-          <div class="tree-legend">
-            <span><b>What this shows:</b> who reports to whom, and each person's clearance — the shape of the org, visible to everyone.</span>
-            <span><b>What it doesn't show:</b> anyone's confidential decisions — see Decision Memory for what your clearance actually unlocks.</span>
+          <div class="panel panel-pad" id="tab-handoffs" style="display:none">
+            <div id="handoffs-root"></div>
           </div>
-          <div id="tree-root"></div>
-        </div>
 
-        <div class="panel panel-pad" id="tab-admin" style="display:none">
-          <div id="admin-root"></div>
+          <div class="panel panel-pad" id="tab-goals" style="display:none">
+            <div id="goals-trace"></div>
+            <div class="goal-col-title">Company goal → department → team → individual work</div>
+            <div class="goal-tree" id="goal-tree"></div>
+          </div>
+
+          <div class="panel panel-pad" id="tab-story" style="display:none">
+            <div id="story-root"></div>
+          </div>
+
+          <div class="panel panel-pad" id="tab-tree" style="display:none">
+            <div class="tree-legend">
+              <span><b>What this shows:</b> who reports to whom, and each person's clearance — the shape of the org, visible to everyone.</span>
+              <span><b>What it doesn't show:</b> anyone's confidential decisions — see Decision Memory for what your clearance actually unlocks.</span>
+            </div>
+            <div id="tree-root"></div>
+          </div>
+
+          <div class="panel panel-pad" id="tab-admin" style="display:none">
+            <div id="admin-root"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -537,12 +600,6 @@
   <div id="leave-modal" class="modal-overlay">
     <div class="modal-card" id="leave-modal-card"></div>
   </div>
-
-  <footer class="site">
-    <div class="wrap">
-      <p>Prototype for internal review. Org, decisions, goals and accounts live in this browser session and reset on reload — there's no database behind them yet. Sign-in is demo-only — every account (including newly added ones) uses the password shown on the login screen. “Ask Cognex” and “Complete the Story” call a real Claude model on the server, with permission filtering enforced server-side before anything is sent to it — if the server's ANTHROPIC_API_KEY isn't configured or is unreachable, those tabs fall back to a local rule-based engine and say so.</p>
-    </div>
-  </footer>
 </div>
 
 <script>
@@ -1025,7 +1082,69 @@
   }
 
   var state = { tab: "ask", chatByKey: {}, story: {} };
-  function chatFor() { var k = sessionKey(); if (!state.chatByKey[k]) state.chatByKey[k] = []; return state.chatByKey[k]; }
+
+  /* ============ Ask Cognex — multiple chat threads, like Claude/ChatGPT's chat
+     history ============
+     Every persona keeps their own list of named chat threads (in-memory only —
+     same reset-on-reload limitation as the rest of the app), so working across
+     several parallel conversations doesn't mean losing track of any of them;
+     each one can still be individually saved into Decision Memory (see
+     saveChatTurnToMemory below) so the company brain keeps building regardless
+     of how many threads someone has open. */
+  var threadCounter = 0;
+  function newThreadObj() {
+    threadCounter += 1;
+    return { id: "thread-" + threadCounter, title: "New chat", turns: [] };
+  }
+  function chatStateFor() {
+    var k = sessionKey();
+    if (!state.chatByKey[k]) state.chatByKey[k] = { threads: [], activeId: null };
+    var cs = state.chatByKey[k];
+    if (!cs.threads.length) {
+      var t = newThreadObj();
+      cs.threads.push(t);
+      cs.activeId = t.id;
+    }
+    if (!cs.activeId || !cs.threads.some(function (t) { return t.id === cs.activeId; })) {
+      cs.activeId = cs.threads[0].id;
+    }
+    return cs;
+  }
+  function activeThread() {
+    var cs = chatStateFor();
+    return cs.threads.filter(function (t) { return t.id === cs.activeId; })[0];
+  }
+  function chatFor() { return activeThread().turns; }
+  function startNewChat() {
+    var cs = chatStateFor();
+    var active = activeThread();
+    // Reuse an already-empty "New chat" rather than stacking up blank threads.
+    if (active && active.turns.length === 0) { state.tab = "ask"; renderApp(); return; }
+    var t = newThreadObj();
+    cs.threads.unshift(t);
+    cs.activeId = t.id;
+    state.tab = "ask";
+    renderApp();
+  }
+  function switchThread(id) {
+    var cs = chatStateFor();
+    cs.activeId = id;
+    state.tab = "ask";
+    renderApp();
+  }
+  function deleteThread(id) {
+    var cs = chatStateFor();
+    if (cs.threads.length <= 1) {
+      var only = cs.threads[0];
+      only.turns = []; only.title = "New chat";
+      renderApp();
+      return;
+    }
+    var wasActive = cs.activeId === id;
+    cs.threads = cs.threads.filter(function (t) { return t.id !== id; });
+    if (wasActive) cs.activeId = cs.threads[0].id;
+    renderApp();
+  }
   function storyStateFor() { var k = sessionKey(); if (!state.story[k]) state.story[k] = { answers: {}, saved: false }; return state.story[k]; }
 
   /* =====================================================================
@@ -1264,6 +1383,7 @@
     }
 
     renderPersonaRail();
+    renderThreadList();
     renderTabs();
     renderAsk();
     renderDecisions();
@@ -1299,22 +1419,43 @@
     document.getElementById("current-title").textContent = current.title + " · " + current.dept;
   }
 
+  function renderThreadList() {
+    var cs = chatStateFor();
+    var wrap = document.getElementById("nav-threads");
+    wrap.innerHTML = "";
+    cs.threads.forEach(function (t) {
+      var row = document.createElement("div");
+      row.className = "nav-thread-row" + (state.tab === "ask" && t.id === cs.activeId ? " active" : "");
+      var tt = document.createElement("span");
+      tt.className = "tt"; tt.textContent = t.title;
+      var del = document.createElement("button");
+      del.className = "nav-thread-del"; del.title = "Delete chat"; del.textContent = "✕";
+      del.addEventListener("click", function (e) { e.stopPropagation(); deleteThread(t.id); });
+      row.appendChild(tt); row.appendChild(del);
+      row.addEventListener("click", function () { switchThread(t.id); });
+      wrap.appendChild(row);
+    });
+  }
+
   var TAB_IDS = ["ask", "decisions", "goals", "story", "tree", "handoffs", "admin"];
   function renderTabs() {
     var company = currentCompany(), p = currentPersona();
     var adminBtn = document.getElementById("admin-tab-btn");
-    adminBtn.style.display = p.isOrgAdmin ? "inline-block" : "none";
+    adminBtn.style.display = p.isOrgAdmin ? "flex" : "none";
     if (state.tab === "admin" && !p.isOrgAdmin) state.tab = "ask";
 
     var myHandoffs = (company.handoffs || []).filter(function (h) { return h.toPersonaId === p.id; });
     var handoffsBtn = document.getElementById("handoffs-tab-btn");
     var pendingCount = myHandoffs.filter(function (h) { return h.status !== "done"; }).length;
-    handoffsBtn.style.display = myHandoffs.length ? "inline-block" : "none";
-    handoffsBtn.textContent = "Handoffs" + (pendingCount ? " (" + pendingCount + ")" : "");
+    handoffsBtn.style.display = myHandoffs.length ? "flex" : "none";
+    handoffsBtn.innerHTML = '<span class="ic">🔁</span> Handoffs' + (pendingCount ? " (" + pendingCount + ")" : "");
     if (state.tab === "handoffs" && !myHandoffs.length) state.tab = "ask";
 
     document.querySelectorAll(".tab-btn").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-tab") === state.tab); });
-    TAB_IDS.forEach(function (id) { document.getElementById("tab-" + id).style.display = state.tab === id ? "block" : "none"; });
+    TAB_IDS.forEach(function (id) {
+      document.getElementById("tab-" + id).style.display = state.tab === id ? (id === "ask" ? "flex" : "block") : "none";
+    });
+    document.getElementById("main-scroll").style.display = state.tab === "ask" ? "none" : "block";
   }
 
   function renderAsk() {
@@ -1327,6 +1468,9 @@
       c.addEventListener("click", function () { submitQuestion(q); });
       chipsWrap.appendChild(c);
     });
+    // Suggestions only make sense before a conversation starts — once there's a
+    // real thread going, hide them so the composer reads like a familiar chat app.
+    chipsWrap.style.display = chatFor().length ? "none" : "flex";
     renderChatLog();
   }
 
@@ -1383,9 +1527,12 @@
     var p = currentPersona();
     var chat = chatFor();
     var log = document.getElementById("chat-log");
-    if (chat.length === 0) { log.innerHTML = '<div class="empty-state">Ask a question above, or pick a suggestion — answers change with who you’re viewing memory as.</div>'; return; }
+    if (chat.length === 0) {
+      log.innerHTML = '<div class="chat-welcome"><h2>Ask Cognex</h2><p>Ask anything — company memory, research, code, drafting — or pick a suggestion below. Answers change with who you’re viewing memory as.</p></div>';
+      return;
+    }
     log.innerHTML = "";
-    chat.forEach(function (turn) {
+    chat.forEach(function (turn, idx) {
       var uDiv = document.createElement("div");
       uDiv.className = "msg-user"; uDiv.textContent = turn.q; log.appendChild(uDiv);
       var block = document.createElement("div");
@@ -1405,11 +1552,43 @@
         : (turn.a.offline
           ? '<span class="badge badge-neutral" style="margin-left:auto">Offline demo mode</span>'
           : '<span class="badge badge-neutral" style="margin-left:auto">as ' + esc(p.name.split(" ")[0]) + " · " + LEVEL_LABEL[p.level] + "</span>");
+      // A quick way to turn any chat answer into a real Decision Memory entry —
+      // so running several parallel chat threads still feeds the same company
+      // brain instead of scattering useful context across throwaway chats.
+      var actionsHtml = turn.savedToMemory
+        ? '<div class="msg-actions"><span class="msg-saved">✓ Saved to Decision Memory</span></div>'
+        : '<div class="msg-actions"><button class="msg-save-btn" data-save-turn="' + idx + '">+ Save to Decision Memory</button></div>';
       block.innerHTML = '<div class="msg-cognex"><div class="who"><div class="avatar sm" style="background:var(--accent-soft);color:var(--accent-ink)">C</div><span class="name">Cognex</span>' +
         modeBadge + "</div>" +
-        '<div class="body">' + turn.a.text + "</div>" + srcHtml + "</div>";
+        '<div class="body">' + turn.a.text + "</div>" + srcHtml + actionsHtml + "</div>";
       log.appendChild(block);
     });
+  }
+  function plainTextOf(turn) {
+    if (turn.a.raw) return turn.a.raw;
+    return String(turn.a.text || "").replace(/<[^>]+>/g, "");
+  }
+  function saveChatTurnToMemory(turnIndex) {
+    var company = currentCompany(), p = currentPersona();
+    var turn = chatFor()[turnIndex];
+    if (!turn || turn.pending || !turn.a || turn.savedToMemory) return;
+    var dateStr = new Date().toISOString().slice(0, 10);
+    storyCounter += 1;
+    var bodyText = plainTextOf(turn);
+    company.decisions.unshift({
+      id: "d-chat-" + company.id + "-" + p.id + "-" + storyCounter,
+      title: turn.q.length > 80 ? turn.q.slice(0, 80) + "…" : turn.q,
+      decided: dateStr, owner: p.name + " · " + p.title,
+      visibility: p.level, derivedLevel: LEVEL.intern,
+      why: [bodyText], alternatives: [], assumptions: [], risks: [],
+      review: "Not yet scheduled", result: "Captured " + dateStr + " via Ask Cognex",
+      tags: tokenize(turn.q).slice(0, 6).concat([(p.dept || "").toLowerCase()]),
+      derived: turn.q + " — context captured directly from " + p.name + "'s conversation with Cognex.",
+      viaChat: true,
+    });
+    turn.savedToMemory = true;
+    renderChatLog();
+    renderDecisions();
   }
   function badgeForAccess(access) {
     if (access === "source") return '<span class="badge badge-source">Source</span>';
@@ -1451,6 +1630,10 @@
     });
     var turn = { q: q, a: { text: "", sources: [] }, pending: true };
     chat.push(turn);
+    var th = activeThread();
+    if (th && th.title === "New chat") th.title = q.length > 42 ? q.slice(0, 42) + "…" : q;
+    renderThreadList();
+    document.getElementById("ask-chips").style.display = "none";
     renderChatLog();
 
     fetch("/api/ask", {
@@ -1527,8 +1710,9 @@
       card.className = "dcard" + (mode !== "source" ? " locked" : "");
       var storyTag = d.viaStory ? '<span class="badge badge-story">Complete the Story</span>' : "";
       var slackTag = d.viaSlack ? '<span class="badge badge-slack">Slack</span>' : "";
+      var chatTag = d.viaChat ? '<span class="badge badge-chat">Ask Cognex</span>' : "";
       var reviewTag = (mode === "source" && decisionNeedsReview(d)) ? ' <span class="badge badge-review">Needs review</span>' : "";
-      var head = '<div class="dcard-head"><h3>' + esc(d.title) + "</h3>" + storyTag + slackTag + sourceBadgeFor(mode) + reviewTag + "</div>" +
+      var head = '<div class="dcard-head"><h3>' + esc(d.title) + "</h3>" + storyTag + slackTag + chatTag + sourceBadgeFor(mode) + reviewTag + "</div>" +
         '<div class="dcard-meta"><span>decided ' + esc(d.decided) + '</span><span>owner: ' + esc(d.owner) + '</span><span>needs ' + LEVEL_LABEL[d.visibility] + "</span></div>";
       var body;
       if (mode === "source") body = '<div class="dcard-body">' + decisionSections(d) + "</div>";
@@ -2327,16 +2511,21 @@
 
   /* ============ Global wiring ============ */
   document.getElementById("chat-log").addEventListener("click", function (e) {
-    var btn = e.target.closest("[data-copy-target]");
-    if (!btn) return;
-    var codeEl = document.getElementById(btn.getAttribute("data-copy-target"));
-    if (!codeEl || !navigator.clipboard) return;
-    navigator.clipboard.writeText(codeEl.textContent).then(function () {
-      var original = btn.textContent;
-      btn.textContent = "Copied";
-      setTimeout(function () { btn.textContent = original; }, 1200);
-    }).catch(function () {});
+    var copyBtn = e.target.closest("[data-copy-target]");
+    if (copyBtn) {
+      var codeEl = document.getElementById(copyBtn.getAttribute("data-copy-target"));
+      if (!codeEl || !navigator.clipboard) return;
+      navigator.clipboard.writeText(codeEl.textContent).then(function () {
+        var original = copyBtn.textContent;
+        copyBtn.textContent = "Copied";
+        setTimeout(function () { copyBtn.textContent = original; }, 1200);
+      }).catch(function () {});
+      return;
+    }
+    var saveBtn = e.target.closest("[data-save-turn]");
+    if (saveBtn) { saveChatTurnToMemory(parseInt(saveBtn.getAttribute("data-save-turn"), 10)); return; }
   });
+  document.getElementById("nav-newchat-btn").addEventListener("click", startNewChat);
   document.getElementById("tabs").addEventListener("click", function (e) {
     var btn = e.target.closest(".tab-btn");
     if (!btn || btn.style.display === "none") return;
@@ -2346,6 +2535,7 @@
       if (company && p) logDecisionMemoryAccess(company, p);
     }
     renderTabs();
+    renderThreadList();
   });
   document.getElementById("leave-company-btn").addEventListener("click", openLeaveFlow);
   document.getElementById("ask-send").addEventListener("click", function () {
