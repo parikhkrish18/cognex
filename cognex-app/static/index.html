@@ -91,6 +91,22 @@
   .badge-neutral { background: var(--surface-3); color: var(--ink-soft); }
   .badge-story { background: var(--purple-soft); color: var(--purple); }
   .badge-admin { background: var(--purple-soft); color: var(--purple); }
+  .badge-slack { background: var(--green-soft); color: var(--green); }
+
+  /* ============ Integrations (Admin tab) ============ */
+  .integration-card { border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
+  .integration-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .integration-name { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; gap: 8px; }
+  .integration-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .integration-meta { font-size: 12.5px; color: var(--ink-faint); margin-top: 4px; }
+  .integration-msg { font-size: 12.5px; color: var(--ink-soft); margin-top: 10px; }
+  .candidate-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-top: 10px; }
+  .candidate-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .candidate-title { font-weight: 600; font-size: 14px; }
+  .candidate-src { font-size: 11.5px; color: var(--ink-faint); }
+  .candidate-list { font-size: 13px; color: var(--ink-soft); margin: 8px 0 0; padding-left: 18px; }
+  .candidate-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  .candidate-vis { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
 
   /* ============ Avatar ============ */
   .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; background: var(--surface-3); color: var(--ink); flex: none; }
@@ -666,10 +682,11 @@
   var COMPANIES = {};
   COMPANIES["cognex-labs"] = seedCognexLabs();
   var storyCounter = 0;
+  var slackCounter = 0;
 
   /* ============ Session ============ */
   var session = { type: null }; // null | {type:'company', companyId, personaId, viaSupport} | {type:'platform'}
-  var ui = { loginError: "", wizard: null, editingMemberId: null };
+  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "" };
 
   function currentCompany() {
     if (session.type === "company") return COMPANIES[session.companyId];
@@ -1416,8 +1433,9 @@
       var card = document.createElement("div");
       card.className = "dcard" + (mode !== "source" ? " locked" : "");
       var storyTag = d.viaStory ? '<span class="badge badge-story">Complete the Story</span>' : "";
+      var slackTag = d.viaSlack ? '<span class="badge badge-slack">Slack</span>' : "";
       var reviewTag = (mode === "source" && decisionNeedsReview(d)) ? ' <span class="badge badge-review">Needs review</span>' : "";
-      var head = '<div class="dcard-head"><h3>' + esc(d.title) + "</h3>" + storyTag + sourceBadgeFor(mode) + reviewTag + "</div>" +
+      var head = '<div class="dcard-head"><h3>' + esc(d.title) + "</h3>" + storyTag + slackTag + sourceBadgeFor(mode) + reviewTag + "</div>" +
         '<div class="dcard-meta"><span>decided ' + esc(d.decided) + '</span><span>owner: ' + esc(d.owner) + '</span><span>needs ' + LEVEL_LABEL[d.visibility] + "</span></div>";
       var body;
       if (mode === "source") body = '<div class="dcard-body">' + decisionSections(d) + "</div>";
@@ -1576,6 +1594,172 @@
     renderApp();
   }
 
+  /* ============ Slack integration (Admin tab) ============
+     Real OAuth connect + ingestion + Claude-powered extraction, talking to
+     the endpoints in slack_integration.py. Connect opens a POPUP window
+     rather than navigating this tab away — this app has no session
+     persistence yet (see the footer note / REFERENCE_BACKEND.md), so a
+     full-page redirect to Slack and back would silently drop everything in
+     COMPANIES. The popup completes OAuth on its own and this tab picks up
+     the change by polling /status once it closes. Nothing here writes to
+     Decision Memory automatically — extraction produces candidates a human
+     must confirm, exactly like Complete the Story already works. */
+  function slackRefreshStatus() {
+    var company = currentCompany();
+    fetch("/api/integrations/slack/status?company_id=" + encodeURIComponent(company.id))
+      .then(function (res) { return res.json(); })
+      .then(function (data) { ui.slackStatus = data; if (data.connected) slackLoadCandidates(); else renderAdmin(); })
+      .catch(function () { ui.slackStatus = { configured: false, connected: false, unreachable: true }; renderAdmin(); });
+  }
+
+  function slackConnect() {
+    var company = currentCompany();
+    var popup = window.open("/api/integrations/slack/authorize?company_id=" + encodeURIComponent(company.id), "slack-connect", "width=600,height=760");
+    if (!popup) { alert("Please allow popups for this site, then try Connect Slack again."); return; }
+    var timer = setInterval(function () {
+      if (popup.closed) { clearInterval(timer); slackRefreshStatus(); }
+    }, 800);
+  }
+
+  function slackDisconnect() {
+    var company = currentCompany();
+    if (!confirm("Disconnect Slack for " + company.name + "? Already-confirmed decisions stay in Decision Memory; the stored connection and any unreviewed candidates are removed.")) return;
+    fetch("/api/integrations/slack/disconnect?company_id=" + encodeURIComponent(company.id), { method: "POST" })
+      .then(function () { ui.slackCandidates = null; ui.slackMsg = ""; slackRefreshStatus(); });
+  }
+
+  function slackSync() {
+    var company = currentCompany();
+    ui.slackBusy = "sync"; ui.slackMsg = ""; renderAdmin();
+    fetch("/api/integrations/slack/sync", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ company_id: company.id }),
+    }).then(function (res) { if (!res.ok) return res.json().then(function (e) { throw new Error(e.detail || "Sync failed"); }); return res.json(); })
+      .then(function (data) {
+        ui.slackBusy = false;
+        ui.slackMsg = "Synced " + data.channels_synced + " channel" + (data.channels_synced === 1 ? "" : "s") + " · " + data.messages_ingested + " new message" + (data.messages_ingested === 1 ? "" : "s") + ".";
+        slackRefreshStatus();
+      }).catch(function (e) { ui.slackBusy = false; ui.slackMsg = e.message; renderAdmin(); });
+  }
+
+  function slackExtract() {
+    var company = currentCompany();
+    ui.slackBusy = "extract"; ui.slackMsg = ""; renderAdmin();
+    var personas = Object.keys(company.personas).map(function (id) {
+      var m = company.personas[id]; return { email: m.email, level: m.level };
+    });
+    fetch("/api/integrations/slack/extract", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ company_id: company.id, personas: personas }),
+    }).then(function (res) { if (!res.ok) return res.json().then(function (e) { throw new Error(e.detail || "Extraction failed"); }); return res.json(); })
+      .then(function (data) {
+        ui.slackBusy = false;
+        ui.slackMsg = "Scanned " + data.channels_scanned + " channel" + (data.channels_scanned === 1 ? "" : "s") + " · found " + data.candidates_created + " possible decision" + (data.candidates_created === 1 ? "" : "s") + " to review below.";
+        slackLoadCandidates();
+        slackRefreshStatus();
+      }).catch(function (e) { ui.slackBusy = false; ui.slackMsg = e.message; renderAdmin(); });
+  }
+
+  function slackLoadCandidates() {
+    var company = currentCompany();
+    fetch("/api/integrations/slack/candidates?company_id=" + encodeURIComponent(company.id))
+      .then(function (res) { return res.json(); })
+      .then(function (data) { ui.slackCandidates = data; renderAdmin(); })
+      .catch(function () { renderAdmin(); });
+  }
+
+  function slackDismissCandidate(id) {
+    var company = currentCompany();
+    fetch("/api/integrations/slack/candidates/" + encodeURIComponent(id) + "/dismiss", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ company_id: company.id }),
+    }).then(function () { slackLoadCandidates(); });
+  }
+
+  function slackConfirmCandidate(id) {
+    var company = currentCompany();
+    var visSelect = document.getElementById("cand-vis-" + id);
+    var visibility = visSelect ? parseInt(visSelect.value, 10) : LEVEL.intern;
+    fetch("/api/integrations/slack/candidates/" + encodeURIComponent(id) + "/confirm", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ company_id: company.id }),
+    }).then(function (res) { return res.json(); })
+      .then(function (row) {
+        var dateStr = new Date().toISOString().slice(0, 10);
+        slackCounter += 1;
+        company.decisions.unshift({
+          id: "d-slack-" + company.id + "-" + slackCounter,
+          title: row.title, decided: dateStr, owner: "#" + row.channel_name + " (Slack)",
+          visibility: visibility, derivedLevel: visibility,
+          why: (row.why && row.why.length) ? row.why : [""],
+          alternatives: row.alternatives || [],
+          assumptions: [],
+          risks: (row.risks && row.risks.length) ? row.risks : [""],
+          review: "Not yet scheduled",
+          result: "Captured " + dateStr + " from Slack #" + row.channel_name,
+          tags: tokenize(row.title).concat(["slack"]),
+          derived: row.title + " — captured automatically from a Slack conversation in #" + row.channel_name + ".",
+          contributor: "", viaSlack: true,
+        });
+        slackLoadCandidates();
+        renderApp();
+      });
+  }
+
+  function renderIntegrations() {
+    var company = currentCompany();
+    var s = ui.slackStatus;
+    var html = '<hr class="sep" /><div class="section-title">Integrations</div>' +
+      '<div class="section-sub">Connect real workspace tools so Cognex can capture decisions where they actually happen, instead of relying only on manual entry.</div>';
+
+    html += '<div class="integration-card"><div class="integration-head">' +
+      '<div class="integration-name">💬 Slack' + (s && s.connected ? ' <span class="badge badge-source">Connected</span>' : "") + '</div>' +
+      '<div class="integration-actions">';
+    if (!s) {
+      html += '<button class="btn-secondary" id="slack-check" disabled>Checking…</button>';
+    } else if (!s.configured) {
+      html += '<span class="integration-meta">Not set up on this server yet — needs a Slack app Client ID/Secret.</span>';
+    } else if (!s.connected) {
+      html += '<button class="btn-primary" id="slack-connect">Connect Slack</button>';
+    } else {
+      html += '<button class="btn-secondary" id="slack-sync"' + (ui.slackBusy ? " disabled" : "") + '>' + (ui.slackBusy === "sync" ? "Syncing…" : "Sync now") + '</button>' +
+        '<button class="btn-secondary" id="slack-extract"' + (ui.slackBusy ? " disabled" : "") + '>' + (ui.slackBusy === "extract" ? "Scanning…" : "Find decisions") + '</button>' +
+        '<button class="btn-danger" id="slack-disconnect">Disconnect</button>';
+    }
+    html += '</div></div>';
+    if (s && s.connected) {
+      html += '<div class="integration-meta">' + esc(s.team_name || "Workspace") + ' · ' + (s.message_count || 0) + ' messages ingested' + (s.pending_candidates ? ' · ' + s.pending_candidates + ' candidate' + (s.pending_candidates === 1 ? "" : "s") + ' awaiting review' : '') + '</div>';
+    }
+    if (ui.slackMsg) html += '<div class="integration-msg">' + esc(ui.slackMsg) + '</div>';
+    html += '</div>';
+
+    if (s && s.connected) {
+      var candidates = ui.slackCandidates || [];
+      html += '<div class="section-sub" style="margin-bottom:6px">Candidate decisions from Slack — nothing here reaches Decision Memory until someone confirms it.</div>';
+      if (!candidates.length) {
+        html += '<div class="empty-decisions">No candidates yet. Sync to pull recent channel history, then Find decisions to scan it.</div>';
+      } else {
+        candidates.forEach(function (c) {
+          var visOptions = [6, 5, 4, 3, 2, 1].map(function (lvl) {
+            var sel = lvl === c.suggested_visibility ? " selected" : "";
+            return '<option value="' + lvl + '"' + sel + ">" + TIER_NAME[lvl] + "+</option>";
+          }).join("");
+          html += '<div class="candidate-card"><div class="candidate-head">' +
+            '<div><div class="candidate-title">' + esc(c.title) + '</div><div class="candidate-src">from #' + esc(c.channel_name) + '</div></div>' +
+            '<span class="badge badge-slack">Slack</span></div>' +
+            (c.why && c.why.length ? '<ul class="candidate-list">' + c.why.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + '</ul>' : '') +
+            '<div class="candidate-actions">' +
+            '<div class="candidate-vis">Visibility: <select id="cand-vis-' + c.id + '">' + visOptions + '</select> <span style="color:var(--ink-faint)">(suggested from who was in the channel)</span></div>' +
+            '<button class="btn-primary" data-confirm-cand="' + c.id + '">Confirm → Decision Memory</button>' +
+            '<button class="btn-secondary" data-dismiss-cand="' + c.id + '">Dismiss</button>' +
+            '</div></div>';
+        });
+      }
+    }
+
+    return html;
+  }
+
   /* ============ Company Tree ============ */
   function renderTree() {
     var company = currentCompany();
@@ -1667,9 +1851,27 @@
           }).join("") + "</tbody></table></div>"
         : '<div class="empty-decisions">No restricted or derived views logged yet — they\'ll appear here as people use Ask Cognex and Decision Memory.</div>');
 
+    html += renderIntegrations();
+
     root.innerHTML = html;
     var exportBtn = document.getElementById("ledger-export");
     if (exportBtn && !exportBtn.disabled) exportBtn.addEventListener("click", function () { exportLedgerCsv(company); });
+
+    if (!ui.slackStatus) { slackRefreshStatus(); }
+    var slackConnectBtn = document.getElementById("slack-connect");
+    if (slackConnectBtn) slackConnectBtn.addEventListener("click", slackConnect);
+    var slackSyncBtn = document.getElementById("slack-sync");
+    if (slackSyncBtn) slackSyncBtn.addEventListener("click", slackSync);
+    var slackExtractBtn = document.getElementById("slack-extract");
+    if (slackExtractBtn) slackExtractBtn.addEventListener("click", slackExtract);
+    var slackDisconnectBtn = document.getElementById("slack-disconnect");
+    if (slackDisconnectBtn) slackDisconnectBtn.addEventListener("click", slackDisconnect);
+    document.querySelectorAll("[data-confirm-cand]").forEach(function (btn) {
+      btn.addEventListener("click", function () { slackConfirmCandidate(btn.getAttribute("data-confirm-cand")); });
+    });
+    document.querySelectorAll("[data-dismiss-cand]").forEach(function (btn) {
+      btn.addEventListener("click", function () { slackDismissCandidate(btn.getAttribute("data-dismiss-cand")); });
+    });
 
     document.getElementById("roster-form").addEventListener("submit", function (e) {
       e.preventDefault();
