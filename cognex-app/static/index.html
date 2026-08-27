@@ -497,6 +497,36 @@
   .handoff-item-text { flex: 1; min-width: 200px; }
   .handoff-item-row select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12.5px; font-family: inherit; background: var(--bg); }
   .suggest-hint { font-size: 11.5px; color: var(--ink-faint); width: 100%; margin-top: -2px; }
+
+  /* ============ Vantage — strategist / gap-finder ============ */
+  .vantage-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .vantage-intro p { color: var(--ink-soft); font-size: 13.5px; max-width: 62ch; margin: 6px 0 0; }
+  .vantage-scan-btn { flex: none; }
+  .vantage-scan-meta { font-size: 11.5px; color: var(--ink-faint); margin-top: 6px; }
+  .vantage-section-title { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-faint); margin: 22px 0 10px; }
+  .vantage-section-title:first-of-type { margin-top: 0; }
+  .gaps-grid { display: flex; flex-direction: column; gap: 12px; }
+  .gcard { border: 1px solid var(--border-soft); border-radius: 16px; padding: 16px 20px; }
+  .gcard-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .gcard-head h3 { font-size: 15px; letter-spacing: -0.01em; margin-right: auto; }
+  .badge-sev-high { background: var(--red-soft); color: var(--red); }
+  .badge-sev-medium { background: #fff1e0; color: #b45c09; }
+  .badge-sev-low { background: var(--surface-3); color: var(--ink-soft); }
+  .badge-type { background: var(--purple-soft); color: var(--purple); }
+  .gcard-desc { font-size: 13.5px; color: var(--ink); line-height: 1.55; margin-bottom: 8px; }
+  .gcard-next { font-size: 12.5px; color: var(--ink-soft); background: var(--surface-2); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
+  .gcard-next b { color: var(--ink); }
+  .gcard-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .gcard-status { font-size: 11.5px; color: var(--ink-faint); margin-left: auto; }
+  .gcard.resolved, .gcard.dismissed { opacity: 0.6; }
+  .vantage-empty { text-align: center; padding: 48px 20px; color: var(--ink-faint); font-size: 13.5px; }
+  .plans-grid { display: flex; flex-direction: column; gap: 10px; }
+  .plan-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 14px; font-size: 13px; }
+  .plan-row .pt { font-weight: 600; flex: 1; min-width: 200px; }
+  .plan-row .po { font-size: 11.5px; color: var(--ink-faint); }
+  .plan-row select { border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; font-size: 12px; font-family: inherit; background: var(--bg); }
+  .plan-form { border: 1px dashed var(--border); border-radius: 14px; padding: 16px 18px; margin-top: 10px; }
+  .plan-form .field { margin-bottom: 10px; }
 </style>
 
 <!-- ============ Landing page (logged out, before "Login" is clicked) ============ -->
@@ -787,6 +817,7 @@
         <button class="tab-btn nav-item" data-tab="goals"><span class="ic">🎯</span> Goal Alignment</button>
         <button class="tab-btn nav-item" data-tab="story"><span class="ic">✍️</span> Complete the Story</button>
         <button class="tab-btn nav-item" data-tab="tree"><span class="ic">🌳</span> Company Tree</button>
+        <button class="tab-btn nav-item" data-tab="vantage" id="vantage-tab-btn"><span class="ic">🧭</span> Vantage<span id="vantage-badge"></span></button>
         <button class="tab-btn nav-item" data-tab="handoffs" id="handoffs-tab-btn" style="display:none"><span class="ic">🔁</span> Handoffs</button>
         <button class="tab-btn nav-item" data-tab="admin" id="admin-tab-btn" style="display:none"><span class="ic">⚙️</span> Admin</button>
       </div>
@@ -879,6 +910,10 @@
               <span><b>What it doesn't show:</b> anyone's confidential decisions — see Decision Memory for what your clearance actually unlocks.</span>
             </div>
             <div id="tree-root"></div>
+          </div>
+
+          <div class="panel panel-pad" id="tab-vantage" style="display:none">
+            <div id="vantage-root"></div>
           </div>
 
           <div class="panel panel-pad" id="tab-admin" style="display:none">
@@ -1061,7 +1096,7 @@
     return {
       id: "cognex-labs", name: "Cognex Labs", industry: "Enterprise AI", seeded: true,
       personas: personas, decisions: decisions, goals: goals, stories: stories, memberCounter: 0,
-      handoffs: [], accessLedger: [],
+      handoffs: [], accessLedger: [], vantageGaps: [], vantagePlans: [],
     };
   }
 
@@ -1072,7 +1107,7 @@
 
   /* ============ Session ============ */
   var session = { type: null }; // null | {type:'company', companyId, personaId, viaSupport} | {type:'platform'}
-  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false };
+  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null };
 
   function currentCompany() {
     if (session.type === "company") return COMPANIES[session.companyId];
@@ -1207,6 +1242,350 @@
     a.href = url; a.download = company.id + "-access-ledger.csv";
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  /* ============ Vantage — the strategist / gap-finder ============
+     Scans the company's own decisions and goals for structurally detectable
+     gaps — an overdue review with no outcome, a goal nobody's assigned to, a
+     department/team goal nothing is actually being done about, and pairs of
+     high-level decisions that share real ground and are worth a cross-check.
+     Detection is deterministic, plain JS — no model call is needed to know a
+     review date has passed or a goal has no children. What calls Claude (see
+     runVantageScan) is turning each candidate into a clear, prioritized
+     write-up with a concrete suggested next step; if that call fails or no
+     API key is configured, the raw computed summary is shown directly
+     instead, labeled "Offline demo mode" like every other live feature here.
+     Every gap carries a visibility level (like a decision's `visibility`)
+     and is fully hidden below that clearance — a deliberate v1
+     simplification versus Decision Memory's source/derived/none three-tier
+     model; worth revisiting if Vantage gets a derived-summary tier later.
+     "Draft a plan" turns an open gap into a tracked plan (owner, status);
+     marking a plan done logs a real Decision Memory entry (tagged
+     viaVantage) so the outcome isn't lost, the same closing-the-loop pattern
+     already used by Ask Cognex's "Save to Decision Memory" and Slack's
+     candidate-confirm flow. "Discuss with Cognex" opens a normal Ask Cognex
+     thread pre-seeded with the gap's write-up as a synthetic first turn —
+     no new chat backend needed, it rides the same /api/ask history-threading
+     that already powers follow-up questions elsewhere in the app. */
+  function gapVisible(persona, gap) { return persona.level >= gap.visibility; }
+
+  function detectVantageCandidates(company) {
+    var candidates = [];
+
+    // 1. Overdue decision reviews with no outcome logged — the exact same
+    // rule the Decision Review Engine banner already uses.
+    company.decisions.forEach(function (d) {
+      if (!decisionNeedsReview(d)) return;
+      candidates.push({
+        id: "gap-review-" + d.id, type: "overdue-review",
+        title: "Overdue review: " + d.title, severity: "medium", visibility: d.visibility,
+        relatedDecisionIds: [d.id], relatedGoalIds: [],
+        summary: 'The decision "' + d.title + '" was scheduled for review (' + d.review + ') but no outcome has been logged yet.',
+      });
+    });
+
+    // 2. Orphaned individual-work goals — the most granular tier of the goal
+    // tree (depth 3, "Individual work · <name>") with nobody assigned.
+    company.goals.forEach(function (g) {
+      if (g.depth !== 3 || g.owner) return;
+      candidates.push({
+        id: "gap-orphan-" + g.id, type: "orphaned-goal",
+        title: "No one assigned: " + g.title, severity: "medium", visibility: LEVEL.manager,
+        relatedGoalIds: [g.id], relatedDecisionIds: [],
+        summary: 'The goal "' + g.title + '" (' + (g.dept || "no department") + ') has no individual owner.',
+      });
+    });
+
+    // 3. Dead-end goals — a department/team-level goal with no individual
+    // work mapped underneath it, i.e. nobody's day-to-day work actually
+    // ladders up to it yet.
+    company.goals.forEach(function (g) {
+      if (g.depth !== 1 && g.depth !== 2) return;
+      var hasChildren = company.goals.some(function (x) { return x.parent === g.id; });
+      if (hasChildren) return;
+      candidates.push({
+        id: "gap-deadend-" + g.id, type: "dead-end-goal",
+        title: "No work mapped to: " + g.title, severity: g.depth === 1 ? "high" : "medium",
+        visibility: g.depth === 1 ? LEVEL.director : LEVEL.manager,
+        relatedGoalIds: [g.id], relatedDecisionIds: [],
+        summary: 'The ' + (g.depth === 1 ? "department" : "team") + ' goal "' + g.title + '" has no team or individual work currently mapped underneath it.',
+      });
+    });
+
+    // 4. Decisions that share real ground and are worth a quick cross-check
+    // — not a claim of an actual conflict, just a flagged connection a human
+    // should glance at. Tag-word overlap, different owners, capped at 3 pairs.
+    var pairs = [];
+    for (var i = 0; i < company.decisions.length; i++) {
+      for (var j = i + 1; j < company.decisions.length; j++) {
+        var da = company.decisions[i], db = company.decisions[j];
+        if (da.owner === db.owner) continue;
+        var aWords = {};
+        (da.tags || []).forEach(function (t) { tokenize(t).forEach(function (w) { if (w.length > 3) aWords[w] = true; }); });
+        var shared = [];
+        (db.tags || []).forEach(function (t) { tokenize(t).forEach(function (w) { if (w.length > 3 && aWords[w] && shared.indexOf(w) === -1) shared.push(w); }); });
+        if (shared.length >= 1) pairs.push({ a: da, b: db, shared: shared });
+      }
+    }
+    pairs.slice(0, 3).forEach(function (pair) {
+      candidates.push({
+        id: "gap-overlap-" + pair.a.id + "-" + pair.b.id, type: "decision-overlap",
+        title: "Worth cross-checking: " + pair.a.title + " ↔ " + pair.b.title,
+        severity: "low", visibility: Math.max(pair.a.visibility, pair.b.visibility),
+        relatedDecisionIds: [pair.a.id, pair.b.id], relatedGoalIds: [],
+        summary: '"' + pair.a.title + '" (owner: ' + pair.a.owner + ') and "' + pair.b.title + '" (owner: ' + pair.b.owner +
+          ') share ground on ' + pair.shared.join(", ") + " — worth a quick check that they're not working at cross purposes.",
+      });
+    });
+
+    return candidates;
+  }
+
+  function runVantageScan() {
+    var company = currentCompany(), p = currentPersona();
+    var candidates = detectVantageCandidates(company).filter(function (c) {
+      return !(company.vantageGaps || []).some(function (g) { return g.id === c.id; });
+    });
+    if (!candidates.length) {
+      ui.vantageMsg = (company.vantageGaps && company.vantageGaps.length) ? "Nothing new since the last scan." : "No structural gaps detected right now.";
+      renderVantage();
+      return;
+    }
+    ui.vantageBusy = true;
+    ui.vantageMsg = "";
+    renderVantage();
+
+    fetch("/api/vantage/scan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        persona: { id: p.id, name: p.name, title: p.title, level: p.level, dept: p.dept },
+        candidates: candidates.map(function (c) {
+          return {
+            id: c.id, type: c.type, title: c.title, severity: c.severity, summary: c.summary,
+            related_goal_ids: c.relatedGoalIds, related_decision_ids: c.relatedDecisionIds,
+          };
+        }),
+      }),
+    }).then(function (res) {
+      if (!res.ok) throw new Error("backend unavailable (" + res.status + ")");
+      return res.json();
+    }).then(function (data) {
+      var byId = {};
+      (data.gaps || []).forEach(function (item) { byId[item.candidate_id] = item; });
+      candidates.forEach(function (c) {
+        var polished = byId[c.id];
+        company.vantageGaps.unshift({
+          id: c.id, type: c.type,
+          title: polished ? polished.title : c.title,
+          description: polished ? polished.description : c.summary,
+          recommendedNextStep: polished ? polished.recommended_next_step : "",
+          severity: polished ? polished.severity : c.severity,
+          visibility: c.visibility, relatedGoalIds: c.relatedGoalIds, relatedDecisionIds: c.relatedDecisionIds,
+          status: "open", surfaced: new Date().toISOString().slice(0, 10), source: "live",
+        });
+      });
+      ui.vantageBusy = false;
+      renderVantage();
+    }).catch(function () {
+      candidates.forEach(function (c) {
+        company.vantageGaps.unshift({
+          id: c.id, type: c.type, title: c.title, description: c.summary, recommendedNextStep: "",
+          severity: c.severity, visibility: c.visibility,
+          relatedGoalIds: c.relatedGoalIds, relatedDecisionIds: c.relatedDecisionIds,
+          status: "open", surfaced: new Date().toISOString().slice(0, 10), source: "offline",
+        });
+      });
+      ui.vantageBusy = false;
+      renderVantage();
+    });
+  }
+
+  function dismissGap(gapId) {
+    var company = currentCompany();
+    var g = (company.vantageGaps || []).filter(function (x) { return x.id === gapId; })[0];
+    if (!g) return;
+    g.status = "dismissed";
+    renderVantage();
+  }
+
+  function startPlanDraft(gapId) { ui.vantagePlanDraftFor = gapId; renderVantage(); }
+  function cancelPlanDraft() { ui.vantagePlanDraftFor = null; renderVantage(); }
+
+  var vantageItemCounter = 0;
+  function submitPlanDraft(gapId, title, description, ownerId) {
+    var company = currentCompany(), p = currentPersona();
+    var g = (company.vantageGaps || []).filter(function (x) { return x.id === gapId; })[0];
+    if (!g) return;
+    var owner = company.personas[ownerId] || p;
+    vantageItemCounter += 1;
+    company.vantagePlans.unshift({
+      id: "plan-" + company.id + "-" + vantageItemCounter,
+      gapId: gapId,
+      title: (title || "").trim() || ("Address: " + g.title),
+      description: (description || "").trim(),
+      ownerId: owner.id, ownerName: owner.name, ownerDept: owner.dept,
+      status: "open", created: new Date().toISOString().slice(0, 10),
+      visibility: g.visibility,
+    });
+    g.status = "planned";
+    ui.vantagePlanDraftFor = null;
+    renderVantage();
+  }
+
+  function updatePlanStatus(planId, newStatus) {
+    var company = currentCompany();
+    var plan = (company.vantagePlans || []).filter(function (x) { return x.id === planId; })[0];
+    if (!plan) return;
+    if (newStatus === "done" && plan.status !== "done") {
+      var outcome = prompt('What actually happened / what changed? (Marking "' + plan.title + '" done logs this into Decision Memory so it\'s not lost.)', "");
+      if (outcome === null) return;
+      plan.status = "done";
+      plan.resolution = outcome.trim();
+      var gap = (company.vantageGaps || []).filter(function (x) { return x.id === plan.gapId; })[0];
+      if (gap) gap.status = "resolved";
+      var dateStr = new Date().toISOString().slice(0, 10);
+      vantageItemCounter += 1;
+      company.decisions.unshift({
+        id: "d-vantage-" + company.id + "-" + vantageItemCounter,
+        title: plan.title,
+        decided: dateStr, owner: plan.ownerName + (plan.ownerDept ? " · " + plan.ownerDept : ""),
+        visibility: plan.visibility, derivedLevel: LEVEL.intern,
+        why: [plan.description || ("Raised by Vantage" + (gap ? (': "' + gap.title + '"') : "") + ".")],
+        alternatives: [], assumptions: [], risks: [],
+        review: "Not yet scheduled", result: plan.resolution || "Done",
+        tags: tokenize(plan.title).slice(0, 6).concat([(plan.ownerDept || "").toLowerCase()]),
+        derived: plan.title + " — a plan raised through Vantage was completed.",
+        viaVantage: true,
+      });
+      renderVantage();
+      renderDecisions();
+      return;
+    }
+    plan.status = newStatus;
+    renderVantage();
+  }
+
+  function discussGapInChat(gapId) {
+    var company = currentCompany();
+    var gap = (company.vantageGaps || []).filter(function (x) { return x.id === gapId; })[0];
+    if (!gap) return;
+    var cs = chatStateFor();
+    var t = newThreadObj();
+    t.title = gap.title.length > 42 ? gap.title.slice(0, 42) + "…" : gap.title;
+    var seedText = "Here's what Vantage flagged:\n\n**" + gap.title + "**\n\n" + gap.description +
+      (gap.recommendedNextStep ? "\n\nSuggested next step: " + gap.recommendedNextStep : "");
+    t.turns.push({
+      q: "Let's talk through this Vantage gap.",
+      a: { text: renderRichText(seedText), raw: seedText, sources: [], live: true, fromVantage: true },
+      pending: false,
+    });
+    cs.threads.unshift(t);
+    cs.activeId = t.id;
+    state.tab = "ask";
+    renderApp();
+  }
+
+  var VANTAGE_TYPE_LABEL = {
+    "overdue-review": "Overdue review", "orphaned-goal": "Unassigned goal",
+    "dead-end-goal": "No work mapped", "decision-overlap": "Worth cross-checking",
+  };
+  function severityBadge(sev) {
+    return '<span class="badge badge-sev-' + sev + '">' + (sev === "high" ? "High" : sev === "low" ? "Low" : "Medium") + " priority</span>";
+  }
+  function planFormHtml_(g, company) {
+    var ownerOptions = Object.keys(company.personas).map(function (id) {
+      var m = company.personas[id];
+      return '<option value="' + id + '">' + esc(m.name) + " — " + esc(m.title) + "</option>";
+    }).join("");
+    var defaultTitle = g.recommendedNextStep ? g.recommendedNextStep.slice(0, 80) : ("Address: " + g.title).slice(0, 80);
+    return '<form class="plan-form" data-plan-form="' + g.id + '">' +
+      '<div class="field"><label>Plan title</label><input type="text" data-pf-title value="' + esc(defaultTitle) + '" /></div>' +
+      '<div class="field"><label>Notes</label><textarea data-pf-desc rows="2"></textarea></div>' +
+      '<div class="field"><label>Owner</label><select data-pf-owner>' + ownerOptions + "</select></div>" +
+      '<div style="display:flex;gap:8px"><button type="submit" class="btn-primary">Create plan</button>' +
+      '<button type="button" class="btn-secondary" data-cancel-plan="' + g.id + '">Cancel</button></div></form>';
+  }
+  function gapCardHtml(g, company) {
+    var offlineTag = g.source === "offline" ? '<span class="badge badge-neutral">Offline demo mode</span>' : "";
+    var actions;
+    if (g.status === "open") {
+      actions = '<div class="gcard-actions">' +
+        '<button class="btn-secondary" data-discuss-gap="' + g.id + '">Discuss with Cognex</button>' +
+        '<button class="btn-secondary" data-draft-plan="' + g.id + '">Draft a plan</button>' +
+        '<button class="link-btn" data-dismiss-gap="' + g.id + '" style="font-size:12.5px">Dismiss</button>' +
+        '<span class="gcard-status">surfaced ' + esc(g.surfaced) + "</span></div>";
+    } else {
+      actions = '<div class="gcard-actions"><span class="gcard-status">' + (g.status === "resolved" ? "✓ Resolved" : "Dismissed") + "</span></div>";
+    }
+    var formHtml = ui.vantagePlanDraftFor === g.id ? planFormHtml_(g, company) : "";
+    return '<div class="gcard' + (g.status !== "open" ? " " + g.status : "") + '">' +
+      '<div class="gcard-head"><h3>' + esc(g.title) + '</h3><span class="badge badge-type">' + esc(VANTAGE_TYPE_LABEL[g.type] || g.type) + "</span>" + severityBadge(g.severity) + offlineTag + "</div>" +
+      '<div class="gcard-desc">' + esc(g.description) + "</div>" +
+      (g.recommendedNextStep ? '<div class="gcard-next"><b>Suggested next step:</b> ' + esc(g.recommendedNextStep) + "</div>" : "") +
+      actions + formHtml + "</div>";
+  }
+  function planRowHtml(pl) {
+    var statusOptions = ["open", "in-progress", "done"].map(function (s) {
+      return '<option value="' + s + '"' + (pl.status === s ? " selected" : "") + ">" + (s === "in-progress" ? "In progress" : s === "done" ? "Done" : "Open") + "</option>";
+    }).join("");
+    return '<div class="plan-row"><span class="pt">' + esc(pl.title) + '</span><span class="po">' + esc(pl.ownerName) + (pl.ownerDept ? " · " + esc(pl.ownerDept) : "") + '</span>' +
+      '<select data-plan-status="' + pl.id + '"' + (pl.status === "done" ? " disabled" : "") + ">" + statusOptions + "</select></div>";
+  }
+
+  function renderVantage() {
+    var company = currentCompany(), p = currentPersona();
+    var root = document.getElementById("vantage-root");
+    var allGaps = (company.vantageGaps || []).filter(function (g) { return gapVisible(p, g); });
+    var openGaps = allGaps.filter(function (g) { return g.status === "open"; });
+    var otherGaps = allGaps.filter(function (g) { return g.status !== "open"; });
+    var plans = (company.vantagePlans || []).filter(function (pl) { return p.level >= pl.visibility; });
+
+    var html = '<div class="vantage-intro"><div><h2 style="margin-bottom:2px">Vantage</h2>' +
+      "<p>Cognex's own read of the company's decisions and goals — overdue reviews, goals nobody's assigned to, work that never got mapped to strategy, and decisions worth a second look. Talk through any of it, or turn it into a tracked plan.</p></div>" +
+      '<div style="text-align:right"><button class="btn-primary vantage-scan-btn" id="vantage-scan-btn"' + (ui.vantageBusy ? " disabled" : "") + ">" + (ui.vantageBusy ? "Scanning…" : "Run analysis") + "</button>" +
+      (ui.vantageMsg ? '<div class="vantage-scan-meta">' + esc(ui.vantageMsg) + "</div>" : "") + "</div></div>";
+
+    if (!allGaps.length && !plans.length) {
+      html += '<div class="vantage-empty">Nothing surfaced yet. Click "Run analysis" to have Vantage scan current decisions and goals for gaps within your visibility.</div>';
+      root.innerHTML = html;
+      wireVantageInteractions(company);
+      return;
+    }
+
+    if (openGaps.length) html += '<div class="vantage-section-title">Open (' + openGaps.length + ')</div><div class="gaps-grid">' + openGaps.map(function (g) { return gapCardHtml(g, company); }).join("") + "</div>";
+    if (plans.length) html += '<div class="vantage-section-title">Plans</div><div class="plans-grid">' + plans.map(planRowHtml).join("") + "</div>";
+    if (otherGaps.length) html += '<div class="vantage-section-title">Resolved &amp; dismissed (' + otherGaps.length + ')</div><div class="gaps-grid">' + otherGaps.map(function (g) { return gapCardHtml(g, company); }).join("") + "</div>";
+
+    root.innerHTML = html;
+    wireVantageInteractions(company);
+  }
+
+  function wireVantageInteractions(company) {
+    var scanBtn = document.getElementById("vantage-scan-btn");
+    if (scanBtn) scanBtn.addEventListener("click", runVantageScan);
+    document.querySelectorAll("[data-discuss-gap]").forEach(function (btn) {
+      btn.addEventListener("click", function () { discussGapInChat(btn.getAttribute("data-discuss-gap")); });
+    });
+    document.querySelectorAll("[data-draft-plan]").forEach(function (btn) {
+      btn.addEventListener("click", function () { startPlanDraft(btn.getAttribute("data-draft-plan")); });
+    });
+    document.querySelectorAll("[data-cancel-plan]").forEach(function (btn) {
+      btn.addEventListener("click", cancelPlanDraft);
+    });
+    document.querySelectorAll("[data-dismiss-gap]").forEach(function (btn) {
+      btn.addEventListener("click", function () { dismissGap(btn.getAttribute("data-dismiss-gap")); });
+    });
+    document.querySelectorAll("[data-plan-form]").forEach(function (form) {
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var gapId = form.getAttribute("data-plan-form");
+        submitPlanDraft(gapId, form.querySelector("[data-pf-title]").value, form.querySelector("[data-pf-desc]").value, form.querySelector("[data-pf-owner]").value);
+      });
+    });
+    document.querySelectorAll("[data-plan-status]").forEach(function (sel) {
+      sel.addEventListener("change", function () { updatePlanStatus(sel.getAttribute("data-plan-status"), sel.value); });
+    });
   }
 
   /* ============ Handoff / offboarding — feature 3 ============ */
@@ -1593,7 +1972,7 @@
         personas: {}, decisions: [],
         goals: [{ id: "g-root", depth: 0, kicker: "Company goal", title: "Define your first company goal", parent: null, dept: null }],
         stories: {}, memberCounter: 0,
-        handoffs: [], accessLedger: [],
+        handoffs: [], accessLedger: [], vantageGaps: [], vantagePlans: [],
       };
       company.personas[founderId] = {
         id: founderId, name: name, title: title, level: LEVEL.ceo, dept: "Executive", email: email,
@@ -1682,6 +2061,7 @@
     renderGoals();
     renderStory();
     renderTree();
+    renderVantage();
     renderHandoffs();
     renderAdmin();
     renderLeaveModal();
@@ -1729,12 +2109,15 @@
     });
   }
 
-  var TAB_IDS = ["ask", "decisions", "goals", "story", "tree", "handoffs", "admin"];
+  var TAB_IDS = ["ask", "decisions", "goals", "story", "tree", "vantage", "handoffs", "admin"];
   function renderTabs() {
     var company = currentCompany(), p = currentPersona();
     var adminBtn = document.getElementById("admin-tab-btn");
     adminBtn.style.display = p.isOrgAdmin ? "flex" : "none";
     if (state.tab === "admin" && !p.isOrgAdmin) state.tab = "ask";
+
+    var visibleOpenGaps = (company.vantageGaps || []).filter(function (g) { return gapVisible(p, g) && g.status === "open"; });
+    document.getElementById("vantage-badge").textContent = visibleOpenGaps.length ? " (" + visibleOpenGaps.length + ")" : "";
 
     var myHandoffs = (company.handoffs || []).filter(function (h) { return h.toPersonaId === p.id; });
     var handoffsBtn = document.getElementById("handoffs-tab-btn");
@@ -1839,7 +2222,9 @@
       if (turn.a.sources && turn.a.sources.length) {
         srcHtml = '<div class="sources"><div class="sources-label">Retrieved from company memory</div>' + turn.a.sources.map(function (s) { return '<div class="source-row">' + s.html + "</div>"; }).join("") + "</div>";
       }
-      var modeBadge = turn.a.live
+      var modeBadge = turn.a.fromVantage
+        ? '<span class="badge badge-type" style="margin-left:auto">From Vantage</span>'
+        : turn.a.live
         ? '<span class="badge badge-source" style="margin-left:auto">Live · Claude</span>'
         : (turn.a.offline
           ? '<span class="badge badge-neutral" style="margin-left:auto">Offline demo mode</span>'

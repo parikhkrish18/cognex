@@ -561,6 +561,103 @@ def offboarding_extract(req: OffboardingExtractRequest):
         raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
 
 
+# ---------------------------------------------------------------------------
+# Vantage — the strategist / gap-finder. Detection of WHAT counts as a gap
+# (overdue review, orphaned goal, dead-end goal, overlapping decisions) is
+# deliberately deterministic plain-JS logic on the frontend (see
+# detectVantageCandidates() in static/index.html) — no model call is needed
+# to know a review date has passed or a goal has no children, and keeping
+# detection rule-based means it's auditable and doesn't hallucinate gaps that
+# aren't there. Claude's job here is narrower and lower-risk: take each
+# already-detected candidate and turn it into a clear, well-prioritized
+# write-up with a concrete suggested next step, for a specific viewer's
+# clearance — one candidate in, one polished gap out, never inventing new
+# gaps outside the candidates it was given.
+# ---------------------------------------------------------------------------
+POLISH_GAPS_SCHEMA = {
+    "name": "submit_vantage_gaps",
+    "description": "Submit a polished write-up for each gap candidate given.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "gaps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "candidate_id": {"type": "string", "description": "Must exactly match one of the candidate ids given."},
+                        "title": {"type": "string", "description": "A short, clear headline for this gap."},
+                        "description": {"type": "string", "description": "1-3 sentences explaining the gap in plain language, grounded strictly in the candidate's summary — do not invent facts not present in it."},
+                        "severity": {"type": "string", "enum": ["high", "medium", "low"], "description": "Your own judgment of urgency; may differ from the candidate's suggested severity if warranted."},
+                        "recommended_next_step": {"type": "string", "description": "One concrete, actionable next step someone could actually take."},
+                    },
+                    "required": ["candidate_id", "title", "description", "severity", "recommended_next_step"],
+                },
+            }
+        },
+        "required": ["gaps"],
+    },
+}
+
+
+def polish_vantage_gaps(persona: dict, candidates: list) -> list:
+    client = Anthropic()
+    cand_text = "\n\n".join(
+        f"- candidate_id={c['id']} | type={c['type']} | suggested severity={c.get('severity','medium')}\n"
+        f"  {c['summary']}"
+        for c in candidates
+    )
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
+        system=(
+            f"You are Vantage, Cognex's forward-looking strategist. You're writing for "
+            f"{persona.get('name','the viewer')} ({persona.get('title','')}, clearance level "
+            f"{persona.get('level', 1)} of 6). You are given a list of gap candidates already "
+            "detected by deterministic rules (overdue decision reviews, unassigned or dead-end "
+            "goals, decisions worth cross-checking) — your job is ONLY to write each one up "
+            "clearly and suggest one concrete next step. Stay strictly grounded in the summary "
+            "given for each candidate; do not invent additional facts, and do not add gaps beyond "
+            "the candidates given. Be direct and specific, not vague corporate-speak."
+        ),
+        tools=[POLISH_GAPS_SCHEMA],
+        tool_choice={"type": "tool", "name": "submit_vantage_gaps"},
+        messages=[{"role": "user", "content": f"Gap candidates:\n\n{cand_text}"}],
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_vantage_gaps":
+            return block.input.get("gaps", [])
+    raise RuntimeError("Claude did not return the expected submit_vantage_gaps tool call.")
+
+
+class GapCandidateIn(BaseModel):
+    id: str
+    type: str
+    title: str
+    severity: str = "medium"
+    summary: str
+    related_goal_ids: list[str] = []
+    related_decision_ids: list[str] = []
+
+
+class VantageScanRequest(BaseModel):
+    persona: PersonaIn
+    candidates: list[GapCandidateIn] = []
+
+
+@router.post("/vantage/scan")
+def vantage_scan(req: VantageScanRequest):
+    if not req.candidates:
+        return {"gaps": []}
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    try:
+        gaps = polish_vantage_gaps(req.persona.model_dump(), [c.model_dump() for c in req.candidates])
+        return {"gaps": gaps}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+
+
 class DelegateCandidateIn(BaseModel):
     id: str
     name: str
