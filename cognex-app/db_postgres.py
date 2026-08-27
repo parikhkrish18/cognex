@@ -33,7 +33,18 @@ if DATABASE_URL.startswith("postgres://"):
 elif DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+# Fail fast instead of hanging forever if Postgres is unreachable or still
+# initializing. Without this, a misconfigured or momentarily-down Postgres
+# makes psycopg's TCP connect block with NO timeout — the FastAPI startup
+# hook (see server.py) then hangs on "Waiting for application startup." with
+# no further log output and no exception, which looks exactly like a silent
+# crash/restart loop from the outside. This is what actually happened on
+# 2026-08-27 (see the build log entry) — the fix is this timeout, not just
+# the one-off infra repair, so the same misconfiguration class can't cause
+# an indefinite hang again even if it recurs.
+_connect_args = {"connect_timeout": 8} if DATABASE_URL.startswith("postgresql") else {}
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=_connect_args)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 

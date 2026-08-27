@@ -65,7 +65,20 @@ def _startup():
     # they don't exist yet, and seeds the Cognex Labs demo company on a
     # brand-new database. Safe to run on every boot — the seed only fires
     # once, when the companies table is empty. See db_postgres.py.
-    init_postgres_db()
+    #
+    # Deliberately non-fatal: on 2026-08-27 a misconfigured Postgres volume
+    # made this call hang forever (no timeout on the underlying connect),
+    # which took the ENTIRE app down — including the static frontend and the
+    # SQLite-backed Slack integration, neither of which actually need
+    # Postgres — because the whole startup hook never completed. db_postgres
+    # now fails fast (an 8s connect timeout) instead of hanging, and this is
+    # caught here so a Postgres outage degrades to "persistence endpoints
+    # return errors" rather than "the whole site is down." See the build log
+    # for the root-cause writeup.
+    try:
+        init_postgres_db()
+    except Exception as e:
+        print(f"[startup] WARNING: Postgres init failed, continuing without persistence: {e}")
 
 
 # The multi-tenant, real-Claude endpoints the deployed frontend actually
