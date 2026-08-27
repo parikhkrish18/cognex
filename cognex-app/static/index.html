@@ -62,26 +62,37 @@
   .topbar-user .whoami .wc { font-size: 11px; color: var(--ink-faint); }
   @media (max-width: 560px) { .topbar-user .whoami { display: none; } }
 
-  /* ============ Hero ============ */
-  .hero { padding: 56px 0 44px; text-align: center; }
-  .hero-eyebrow { font-size: 13px; font-weight: 590; letter-spacing: 0.01em; color: var(--accent); margin-bottom: 16px; }
-  .hero h1 { font-size: clamp(30px, 4.6vw, 46px); line-height: 1.07; letter-spacing: -0.03em; max-width: 16ch; margin: 0 auto; }
-  .hero h1 .soft { color: var(--ink-soft); }
-  .hero p.lede { margin: 18px auto 0; max-width: 54ch; font-size: 17.5px; line-height: 1.5; color: var(--ink-soft); }
 
-  .proof { margin: 36px auto 0; max-width: 900px; text-align: left; border: 1px solid var(--border-soft); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-md); overflow: hidden; }
-  .proof-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 22px; background: var(--surface-2); border-bottom: 1px solid var(--border-soft); flex-wrap: wrap; }
-  .proof-head .q { font-size: 15.5px; font-weight: 500; color: var(--ink); }
-  .proof-cols { display: grid; grid-template-columns: 1fr 1fr; }
-  @media (max-width: 680px) { .proof-cols { grid-template-columns: 1fr; } }
-  .proof-col { padding: 22px 24px; }
-  .proof-col + .proof-col { border-left: 1px solid var(--border-soft); }
-  @media (max-width: 680px) { .proof-col + .proof-col { border-left: none; border-top: 1px solid var(--border-soft); } }
-  .proof-who { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-  .proof-who .name { font-weight: 600; font-size: 14px; }
-  .proof-who .title { font-size: 12.5px; color: var(--ink-faint); }
-  .proof-answer { font-size: 14.5px; color: var(--ink); text-align: left; }
-  .proof-answer.derived { color: var(--ink-soft); }
+  /* ============ Landing page — plain black & white, one gradient moment ============ */
+  .landing-topbar { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .landing-mark { font-weight: 600; font-size: 19px; letter-spacing: -0.02em; color: var(--ink); }
+  .landing-login-btn { border: 1px solid var(--ink); background: var(--ink); color: #fff; border-radius: 980px; padding: 9px 20px; font-weight: 590; font-size: 13.5px; cursor: pointer; }
+  .landing-login-btn:hover { background: #3a3a3c; }
+  .landing-hero { padding: 64px 0 48px; text-align: center; }
+  .landing-eyebrow { font-size: 13px; font-weight: 590; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 18px; }
+  .landing-hero h1 {
+    font-size: clamp(32px, 5vw, 50px); line-height: 1.08; letter-spacing: -0.03em; max-width: 17ch; margin: 0 auto;
+    background-image: linear-gradient(100deg, #ff3b30, #ff9500, #ffcc00, #34c759, #00c7be, #007aff, #5856d6, #ff2d92);
+    background-clip: text; -webkit-background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+  }
+  .landing-hero p.lede { margin: 20px auto 0; max-width: 52ch; font-size: 17.5px; line-height: 1.5; color: var(--ink-soft); }
+  .landing-proof { max-width: 900px; margin: 44px auto 0; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; text-align: left; }
+  .landing-proof-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 22px; background: var(--bg-soft); border-bottom: 1px solid var(--border-soft); flex-wrap: wrap; }
+  .landing-proof-head .q { font-size: 15.5px; font-weight: 500; color: var(--ink); }
+  .landing-badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 590; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+  .landing-badge-neutral { background: var(--surface-3); color: var(--ink-soft); }
+  .landing-badge-source { background: var(--ink); color: #fff; }
+  .landing-badge-derived { background: #fff; color: var(--ink); border: 1px solid var(--ink); }
+  .landing-proof-cols { display: grid; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 680px) { .landing-proof-cols { grid-template-columns: 1fr; } }
+  .landing-proof-col { padding: 22px 24px; }
+  .landing-proof-col + .landing-proof-col { border-left: 1px solid var(--border-soft); }
+  @media (max-width: 680px) { .landing-proof-col + .landing-proof-col { border-left: none; border-top: 1px solid var(--border-soft); } }
+  .landing-proof-who { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .landing-proof-who .name { font-weight: 600; font-size: 14px; color: var(--ink); }
+  .landing-proof-who .title { font-size: 12.5px; color: var(--ink-faint); }
+  .landing-proof-answer { font-size: 14.5px; color: var(--ink); text-align: left; }
+  .landing-proof-answer.derived { color: var(--ink-soft); }
 
   /* ============ Badges ============ */
   .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 590; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
@@ -334,6 +345,46 @@
   .suggest-hint { font-size: 11.5px; color: var(--ink-faint); width: 100%; margin-top: -2px; }
 </style>
 
+<!-- ============ Landing page (logged out, before "Login" is clicked) ============ -->
+<div id="landing-shell" style="display:none">
+  <div class="wrap landing-topbar">
+    <div class="landing-mark">Cognex</div>
+    <button class="landing-login-btn" id="landing-login-btn">Login</button>
+  </div>
+  <div class="landing-hero">
+    <div class="wrap">
+      <div class="landing-eyebrow">The memory layer for your company</div>
+      <h1>One memory. A different view for everyone who asks.</h1>
+      <p class="lede">Glean helps a company find what it knows. Cognex remembers what it knows, why it decided what it decided, and gives each person exactly the context their role has earned — never the raw source underneath it.</p>
+
+      <div class="landing-proof">
+        <div class="landing-proof-head">
+          <span class="q">“Why is fulfillment planning changing for the UAE launch?”</span>
+          <span class="landing-badge landing-badge-neutral">Same question, same memory</span>
+        </div>
+        <div class="landing-proof-cols">
+          <div class="landing-proof-col">
+            <div class="landing-proof-who">
+              <div class="avatar sm" id="landing-proof-ceo-avatar"></div>
+              <div><div class="name" id="landing-proof-ceo-name"></div><div class="title" id="landing-proof-ceo-title"></div></div>
+              <span class="landing-badge landing-badge-source" style="margin-left:auto">Source access</span>
+            </div>
+            <div class="landing-proof-answer" id="landing-proof-ceo-answer"></div>
+          </div>
+          <div class="landing-proof-col">
+            <div class="landing-proof-who">
+              <div class="avatar sm" id="landing-proof-intern-avatar"></div>
+              <div><div class="name" id="landing-proof-intern-name"></div><div class="title" id="landing-proof-intern-title"></div></div>
+              <span class="landing-badge landing-badge-derived" style="margin-left:auto">Derived context</span>
+            </div>
+            <div class="landing-proof-answer derived" id="landing-proof-intern-answer"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ============ Login shell ============ -->
 <div id="login-shell" class="center-shell">
   <div class="center-card" id="login-card"></div>
@@ -378,39 +429,6 @@
       <div class="admin-banner" style="margin-bottom:0">
         <span>🛟 You're signed in as Cognex staff, viewing this company for support.</span>
         <button class="btn-secondary" id="exit-support">Exit to staff console</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="hero">
-    <div class="wrap">
-      <div class="hero-eyebrow">THE MEMORY LAYER FOR YOUR COMPANY</div>
-      <h1>One memory. <span class="soft">A different view for everyone who asks.</span></h1>
-      <p class="lede">Glean helps a company find what it knows. Cognex remembers what it knows, why it decided what it decided, and gives each person exactly the context their role has earned — never the raw source underneath it.</p>
-
-      <div class="proof">
-        <div class="proof-head">
-          <span class="q">“Why is fulfillment planning changing for the UAE launch?”</span>
-          <span class="badge badge-neutral">Same question, same memory</span>
-        </div>
-        <div class="proof-cols">
-          <div class="proof-col">
-            <div class="proof-who">
-              <div class="avatar sm" id="proof-ceo-avatar"></div>
-              <div><div class="name" id="proof-ceo-name"></div><div class="title" id="proof-ceo-title"></div></div>
-              <span class="badge badge-source" style="margin-left:auto">Source access</span>
-            </div>
-            <div class="proof-answer" id="proof-ceo-answer"></div>
-          </div>
-          <div class="proof-col">
-            <div class="proof-who">
-              <div class="avatar sm" id="proof-intern-avatar"></div>
-              <div><div class="name" id="proof-intern-name"></div><div class="title" id="proof-intern-title"></div></div>
-              <span class="badge badge-derived" style="margin-left:auto">Derived context</span>
-            </div>
-            <div class="proof-answer derived" id="proof-intern-answer"></div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -686,7 +704,7 @@
 
   /* ============ Session ============ */
   var session = { type: null }; // null | {type:'company', companyId, personaId, viaSupport} | {type:'platform'}
-  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "" };
+  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false };
 
   function currentCompany() {
     if (session.type === "company") return COMPANIES[session.companyId];
@@ -995,6 +1013,7 @@
      RENDERING — top-level shell switch
   ===================================================================== */
   function renderShell() {
+    document.getElementById("landing-shell").style.display = "none";
     document.getElementById("login-shell").style.display = "none";
     document.getElementById("onboarding-shell").style.display = "none";
     document.getElementById("platform-shell").style.display = "none";
@@ -1006,6 +1025,7 @@
       var c = currentCompany(), p = currentPersona();
       if (c && p) { document.getElementById("app-shell").style.display = "block"; renderApp(); return; }
     }
+    if (!ui.showLogin) { document.getElementById("landing-shell").style.display = "block"; return; }
     renderLogin();
     document.getElementById("login-shell").style.display = "flex";
   }
@@ -1023,6 +1043,7 @@
     }).join("");
 
     document.getElementById("login-card").innerHTML =
+      '<button class="link-btn" id="back-to-landing" style="font-size:12.5px;margin-bottom:10px">← Back</button>' +
       '<div class="brand-row"><span class="mark">Cognex</span></div>' +
       '<div class="screen-title">Sign in</div>' +
       '<div class="screen-sub">The memory layer for your company.</div>' +
@@ -1075,6 +1096,9 @@
       } else {
         alert("That's not a recognized staff account in this demo.");
       }
+    });
+    document.getElementById("back-to-landing").addEventListener("click", function () {
+      ui.showLogin = false; ui.loginError = ""; renderShell();
     });
   }
 
@@ -1212,7 +1236,7 @@
       });
     });
 
-    document.getElementById("platform-logout").onclick = function () { session = { type: null }; renderShell(); };
+    document.getElementById("platform-logout").onclick = function () { session = { type: null }; ui.showLogin = false; renderShell(); };
   }
 
   /* =====================================================================
@@ -2217,19 +2241,19 @@
     var ceoA = acquisitionAnswer(seed, ceo);
     var internA = acquisitionAnswer(seed, intern);
 
-    document.getElementById("proof-ceo-avatar").style.background = ceo.bg;
-    document.getElementById("proof-ceo-avatar").style.color = ceo.fg;
-    document.getElementById("proof-ceo-avatar").textContent = ceo.initials;
-    document.getElementById("proof-ceo-name").textContent = ceo.name;
-    document.getElementById("proof-ceo-title").textContent = ceo.title;
-    document.getElementById("proof-ceo-answer").innerHTML = ceoA.text;
+    document.getElementById("landing-proof-ceo-avatar").style.background = ceo.bg;
+    document.getElementById("landing-proof-ceo-avatar").style.color = ceo.fg;
+    document.getElementById("landing-proof-ceo-avatar").textContent = ceo.initials;
+    document.getElementById("landing-proof-ceo-name").textContent = ceo.name;
+    document.getElementById("landing-proof-ceo-title").textContent = ceo.title;
+    document.getElementById("landing-proof-ceo-answer").innerHTML = ceoA.text;
 
-    document.getElementById("proof-intern-avatar").style.background = intern.bg;
-    document.getElementById("proof-intern-avatar").style.color = intern.fg;
-    document.getElementById("proof-intern-avatar").textContent = intern.initials;
-    document.getElementById("proof-intern-name").textContent = intern.name;
-    document.getElementById("proof-intern-title").textContent = intern.title;
-    document.getElementById("proof-intern-answer").innerHTML = internA.text;
+    document.getElementById("landing-proof-intern-avatar").style.background = intern.bg;
+    document.getElementById("landing-proof-intern-avatar").style.color = intern.fg;
+    document.getElementById("landing-proof-intern-avatar").textContent = intern.initials;
+    document.getElementById("landing-proof-intern-name").textContent = intern.name;
+    document.getElementById("landing-proof-intern-title").textContent = intern.title;
+    document.getElementById("landing-proof-intern-answer").innerHTML = internA.text;
   }
 
   /* ============ Global wiring ============ */
@@ -2251,8 +2275,9 @@
   document.getElementById("ask-input").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { submitQuestion(this.value); this.value = ""; }
   });
-  document.getElementById("app-logout").addEventListener("click", function () { session = { type: null }; renderShell(); });
+  document.getElementById("app-logout").addEventListener("click", function () { session = { type: null }; ui.showLogin = false; renderShell(); });
   document.getElementById("exit-support").addEventListener("click", function () { session = { type: "platform" }; renderShell(); });
+  document.getElementById("landing-login-btn").addEventListener("click", function () { ui.showLogin = true; renderShell(); });
 
   renderProof();
   renderShell();
