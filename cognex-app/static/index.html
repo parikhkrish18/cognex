@@ -186,6 +186,25 @@
   .msg-cognex .who .name { font-weight: 600; font-size: 12.5px; }
   .msg-cognex .body { font-size: 14.5px; color: var(--ink); }
   .msg-cognex .body em { color: var(--accent-ink); font-style: normal; }
+  .msg-cognex .body p { margin: 0 0 10px; }
+  .msg-cognex .body p:last-child { margin-bottom: 0; }
+  .msg-cognex .body code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; background: var(--surface-3); padding: 1px 5px; border-radius: 5px; }
+  .msg-cognex .body .md-list { margin: 0 0 10px; padding-left: 20px; }
+  .msg-cognex .body .md-list:last-child { margin-bottom: 0; }
+  .msg-cognex .body .md-list li { margin-bottom: 3px; }
+  .msg-cognex .body .md-h3, .msg-cognex .body .md-h4, .msg-cognex .body .md-h5 { font-weight: 600; margin: 14px 0 6px; }
+  .msg-cognex .body .md-h3:first-child, .msg-cognex .body .md-h4:first-child, .msg-cognex .body .md-h5:first-child { margin-top: 0; }
+  .msg-cognex .body .md-h3 { font-size: 15.5px; }
+  .msg-cognex .body .md-h4 { font-size: 14.5px; }
+  .msg-cognex .body .md-h5 { font-size: 13.5px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .02em; }
+  .code-block { margin: 4px 0 12px; border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; background: #1d1d1f; }
+  .code-block:last-child { margin-bottom: 0; }
+  .code-block-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #2c2c2e; }
+  .code-block-head span { font-size: 11px; color: #98989d; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; text-transform: lowercase; }
+  .code-copy-btn { border: none; background: transparent; color: #98989d; font-size: 11px; font-weight: 500; cursor: pointer; padding: 2px 6px; border-radius: 5px; }
+  .code-copy-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  .code-block pre { margin: 0; padding: 12px 14px; overflow-x: auto; }
+  .code-block code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.55; color: #f2f2f7; background: none; padding: 0; white-space: pre; }
   .sources { display: flex; flex-direction: column; gap: 7px; margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--border-soft); }
   .sources-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; color: var(--ink-faint); margin-bottom: 2px; }
   .source-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex-wrap: wrap; }
@@ -1310,6 +1329,56 @@
     });
     renderChatLog();
   }
+
+  /* ============ Markdown-lite renderer for live Ask Cognex answers ============
+     Live answers can now be genuine research/writing/coding responses, not just
+     short company-memory lookups, so they need real formatting: fenced code
+     blocks, inline code, bold/italic, headers, and lists. This is intentionally
+     NOT a full CommonMark implementation — just the subset that shows up in
+     practice — and it escapes all text content before wrapping it in real tags,
+     so nothing in a model's response can inject markup. */
+  function inlineFormat(s) {
+    var out = esc(s);
+    out = out.replace(/`([^`]+)`/g, function (_, code) { return "<code>" + code + "</code>"; });
+    out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    out = out.replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,!?]|$)/g, "$1<em>$2</em>");
+    return out;
+  }
+  function renderRichText(raw) {
+    if (!raw) return "";
+    var codeBlocks = [];
+    var withoutCode = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) {
+      var idx = codeBlocks.length;
+      codeBlocks.push({ lang: lang || "", code: code.replace(/\n$/, "") });
+      return "@@CODEBLOCK" + idx + "@@";
+    });
+    return withoutCode.split(/\n{2,}/).map(function (block) {
+      block = block.trim();
+      if (!block) return "";
+      var codeMatch = block.match(/^@@CODEBLOCK(\d+)@@$/);
+      if (codeMatch) {
+        var cb = codeBlocks[parseInt(codeMatch[1], 10)];
+        var codeId = "code-" + Math.random().toString(36).slice(2, 9);
+        return '<div class="code-block"><div class="code-block-head"><span>' + esc(cb.lang || "code") + '</span>' +
+          '<button class="code-copy-btn" data-copy-target="' + codeId + '">Copy</button></div>' +
+          '<pre><code id="' + codeId + '">' + esc(cb.code) + '</code></pre></div>';
+      }
+      var lines = block.split("\n");
+      var headerMatch = lines.length === 1 && lines[0].match(/^(#{1,4})\s+(.*)$/);
+      if (headerMatch) {
+        var level = Math.min(headerMatch[1].length + 2, 5);
+        return '<div class="md-h' + level + '">' + inlineFormat(headerMatch[2]) + "</div>";
+      }
+      if (lines.every(function (l) { return /^[-*]\s+/.test(l.trim()); })) {
+        return '<ul class="md-list">' + lines.map(function (l) { return "<li>" + inlineFormat(l.trim().replace(/^[-*]\s+/, "")) + "</li>"; }).join("") + "</ul>";
+      }
+      if (lines.every(function (l) { return /^\d+\.\s+/.test(l.trim()); })) {
+        return '<ol class="md-list">' + lines.map(function (l) { return "<li>" + inlineFormat(l.trim().replace(/^\d+\.\s+/, "")) + "</li>"; }).join("") + "</ol>";
+      }
+      return "<p>" + lines.map(inlineFormat).join("<br>") + "</p>";
+    }).join("");
+  }
+
   function renderChatLog() {
     var p = currentPersona();
     var chat = chatFor();
@@ -1371,6 +1440,15 @@
     if (!q || !q.trim()) return;
     var company = currentCompany(), p = currentPersona();
     var chat = chatFor();
+    // Thread real conversation history to the model so follow-ups work ("now add
+    // error handling to that") — only from prior LIVE turns, since an offline
+    // rule-based fallback answer was never actually part of the model's context.
+    var history = [];
+    chat.forEach(function (t) {
+      if (t.pending || !t.a || !t.a.live || !t.a.raw) return;
+      history.push({ role: "user", content: t.q });
+      history.push({ role: "assistant", content: t.a.raw });
+    });
     var turn = { q: q, a: { text: "", sources: [] }, pending: true };
     chat.push(turn);
     renderChatLog();
@@ -1383,6 +1461,7 @@
         decisions: company.decisions,
         goals: company.goals,
         message: q,
+        history: history,
       }),
     }).then(function (res) {
       if (!res.ok) throw new Error("backend unavailable (" + res.status + ")");
@@ -1395,7 +1474,7 @@
           if (item && item.id && item.access && item.access !== "source") logAccessLedger(company, p, item.id, item.title || item.id, item.access, "Ask Cognex");
         });
       });
-      turn.a = { text: esc(data.answer).replace(/\n/g, "<br>"), sources: sourcesFromToolCalls(data.tool_calls), live: true };
+      turn.a = { text: renderRichText(data.answer), raw: data.answer, sources: sourcesFromToolCalls(data.tool_calls), live: true };
       turn.pending = false;
       renderChatLog();
     }).catch(function () {
@@ -2247,6 +2326,17 @@
   }
 
   /* ============ Global wiring ============ */
+  document.getElementById("chat-log").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-copy-target]");
+    if (!btn) return;
+    var codeEl = document.getElementById(btn.getAttribute("data-copy-target"));
+    if (!codeEl || !navigator.clipboard) return;
+    navigator.clipboard.writeText(codeEl.textContent).then(function () {
+      var original = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(function () { btn.textContent = original; }, 1200);
+    }).catch(function () {});
+  });
   document.getElementById("tabs").addEventListener("click", function (e) {
     var btn = e.target.closest(".tab-btn");
     if (!btn || btn.style.display === "none") return;
