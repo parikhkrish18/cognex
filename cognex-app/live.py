@@ -41,35 +41,52 @@ MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 MAX_TOOL_ROUNDS = 8
 
 # ---------------------------------------------------------------------------
-# Real web search + real code execution — added 2026-08-29 so Ask Cognex can
-# actually search the web and actually run numbers/build charts, instead of
-# only answering from the model's own knowledge and prose estimates. These
-# are Anthropic *server* tools: unlike search_decisions/get_decision/etc.
-# below (which we implement and execute ourselves), Anthropic's API executes
-# these itself and returns the result inline in the same response — see the
-# tool_use handling in run_agent_turn for why that changes the loop slightly.
+# Real web search + real web fetch + real code execution — added 2026-08-29
+# so Ask Cognex can actually search the web, actually retrieve a specific
+# page, and actually run numbers/build charts, instead of only answering
+# from the model's own knowledge and prose estimates. These are Anthropic
+# *server* tools: unlike search_decisions/get_decision/etc. below (which we
+# implement and execute ourselves), Anthropic's API executes these itself
+# and returns the result inline in the same response — see the tool_use
+# handling in run_agent_turn for why that changes the loop slightly.
 #
-# max_uses=5 bounds worst-case web search cost per turn ($10/1,000 searches,
-# per Anthropic's pricing docs, plus normal token cost for retrieved pages).
+# web_search vs. web_fetch — these solve different problems and Claude picks
+# between them: web_search queries a search index, so it can miss a small,
+# new, or lightly-indexed site entirely even though the site is live and
+# real (hit this in production: asking about the founder's own studio site
+# came back "no results," because web_search just never indexed it). web_fetch
+# directly retrieves a specific URL's content — the same thing Claude.ai does
+# when you paste a link — and works regardless of search-index coverage. Both
+# are included so Claude can use whichever fits: search when it doesn't have
+# a URL yet, fetch when it does (a URL from the user's own message, or one
+# web_search just returned). web_fetch is also a genuine safety design, not
+# just a feature: per Anthropic's docs it can ONLY fetch a URL that already
+# appeared somewhere in the conversation (the user's message, a tool result,
+# a prior search result) — it cannot fetch a URL Claude invents on its own.
 #
-# IMPORTANT: web_search is pinned to the 20250305 (basic) version deliberately,
-# NOT the newer 20260209+/20260318 versions. Anthropic's newer web_search
-# versions add "dynamic filtering" — they auto-provision their OWN internal
-# code_execution tool to filter search results before they reach the context
-# window. If we ALSO declare our own code_execution tool (which we need, for
-# genuine user-requested computation/charts, not just search-result
-# filtering), the API rejects the request outright: "Auto-injecting tools
-# would conflict with existing tool names: ['code_execution']" — hit this
-# live in production on 2026-08-29 (see that build-log entry). Using the
-# basic web_search version avoids the auto-injection entirely, so our
-# explicit code_execution tool is the only one and stays a general-purpose
-# tool Claude can invoke for anything, not just search filtering. Trade-off:
-# with this version pairing, code_execution is billed normally (by execution
-# time, 5-minute minimum per invocation) rather than being free — but
-# Anthropic's free tier (1,550 container-hours/month per org, per their
-# pricing docs) should comfortably cover this app's realistic usage.
+# max_uses=5 on each bounds worst-case cost per turn. web_search is
+# $10/1,000 searches plus normal token cost for retrieved pages; web_fetch
+# has no separate charge beyond normal token cost per Anthropic's pricing
+# docs.
+#
+# IMPORTANT: both web_search AND web_fetch are pinned to their basic/oldest
+# versions (20250305 / 20250910) deliberately, NOT their newer 20260209+
+# versions. Anthropic's newer versions of both tools add "dynamic
+# filtering" — they auto-provision their OWN internal code_execution tool to
+# filter results before they reach the context window. If we ALSO declare
+# our own code_execution tool (which we need, for genuine user-requested
+# computation/charts, not just result filtering), the API rejects the
+# request outright: "Auto-injecting tools would conflict with existing tool
+# names: ['code_execution']" — hit this live in production on 2026-08-29 with
+# web_search (see that build-log entry); web_fetch's dynamic-filtering
+# versions would collide the same way, so it's pinned old from the start.
+# Trade-off: with these basic versions, code_execution is billed normally
+# (by execution time, 5-minute minimum per invocation) rather than being
+# free — but Anthropic's free tier (1,550 container-hours/month per org, per
+# their pricing docs) should comfortably cover this app's realistic usage.
 SERVER_TOOLS = [
     {"type": "web_search_20250305", "name": "web_search", "max_uses": 5},
+    {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 5},
     {"type": "code_execution_20250825", "name": "code_execution"},
 ]
 
@@ -285,7 +302,7 @@ working code with explanation when asked to write code, thorough research or doc
 asked for it. Do not artificially shorten an answer that deserves depth — match length and
 structure to what the question actually needs, not to a fixed target.
 
-You have two real capabilities beyond your own training, and you should reach for them whenever
+You have three real capabilities beyond your own training, and you should reach for them whenever
 they would make an answer better rather than defaulting to a prose guess:
 - Web search: use it for anything current, time-sensitive, or better answered with a real source
   (prices, news, a competitor's current product, a fact you're not fully certain of) — don't
@@ -293,6 +310,12 @@ they would make an answer better rather than defaulting to a prose guess:
   financial figures, names of people or deals) into a search query — search generically; if a
   question genuinely needs company-internal information, use your company-memory tools below
   instead of the web for that part.
+- Web fetch: when you have (or the person gives you) a specific URL or a named site/domain — not
+  just a general topic — fetch it directly instead of only searching for it. Search queries a
+  search index and can come back empty for a small, new, or lightly-indexed site even though the
+  site is live and real; fetching the URL directly works regardless. If a search doesn't surface
+  something the person clearly expects to be findable and they named a specific site, try
+  fetching it directly before concluding it doesn't exist.
 - Code execution (a real Python sandbox): use it whenever a question involves actual computation,
   data analysis, or a chart — run the numbers for real instead of estimating them in prose, and
   generate an actual chart image when a visualization would help instead of describing one in
@@ -516,6 +539,122 @@ def ask(req: AskRequest):
         return run_agent_turn(persona, decisions, goals, req.message, req.history)
     except Exception as e:
         _log_and_raise_502("ask", e)
+
+
+# ---------------------------------------------------------------------------
+# Complete the Story — question generation. Added 2026-08-29: this step had
+# NEVER actually called Claude — every persona always got the same
+# hardcoded client-side template ("{title} — current priorities", three
+# generic questions), regardless of whether they had any real individual
+# goal or contributed decision to reference. That's why the CEO — who has no
+# individual goal in the seed data — was asked the identical generic
+# questions as everyone else, and why the questions never named anything
+# specific. This mirrors the offboarding question-generation pattern
+# (generate_handoff_questions above), grounded in the SAME kind of context
+# (an individual goal, recent contributed decisions), with one addition: the
+# model is explicitly told to say there's nothing to ask about rather than
+# invent a plausible-sounding generic question when there's no real signal —
+# directly per the founder's own framing: "if there's nothing to complete
+# there shouldn't be any questions, otherwise the questions need to be
+# specific."
+GENERATE_STORY_QUESTIONS_SCHEMA = {
+    "name": "submit_story_questions",
+    "description": "Submit whether there is real work to ask this person about, and if so, specific questions grounded in it.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "has_work_to_capture": {
+                "type": "boolean",
+                "description": (
+                    "True ONLY if the goal/decision context given actually gives something concrete "
+                    "and current to ask about. False if there is genuinely nothing specific — no "
+                    "individual goal and no recent contributed decisions. Do not invent a plausible-"
+                    "sounding 'current priorities' question when there's nothing real to reference; "
+                    "many senior roles (CEO, CFO) legitimately have no single tracked individual goal, "
+                    "and that's a normal, expected false here, not a gap to paper over."
+                ),
+            },
+            "work_item_label": {
+                "type": "string",
+                "description": (
+                    "A short, specific label for what's being captured, naming the actual goal or "
+                    "decision title given (e.g. the literal goal title, not a role-based placeholder "
+                    "like '<title> — current priorities'). Empty string if has_work_to_capture is false."
+                ),
+            },
+            "questions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "field": {"type": "string", "enum": ["who", "why", "risk"]},
+                        "prompt": {
+                            "type": "string",
+                            "description": "A specific question that names the actual goal or decision by title — never a generic templated question like 'why does this matter for the team right now'.",
+                        },
+                    },
+                    "required": ["field", "prompt"],
+                },
+                "description": "2-3 specific questions if has_work_to_capture is true; empty array otherwise.",
+            },
+        },
+        "required": ["has_work_to_capture", "work_item_label", "questions"],
+    },
+}
+
+
+def generate_story_questions(persona: dict, individual_goal: Optional[dict], recent_decisions: list) -> dict:
+    client = Anthropic()
+    context = f"{persona.get('name', '')}, {persona.get('title', '')}, {persona.get('dept', '')} department.\n"
+    if individual_goal:
+        context += f"Their individual goal: {individual_goal.get('title', '')}"
+        if individual_goal.get("kicker"):
+            context += f" ({individual_goal['kicker']})"
+        context += "\n"
+    if recent_decisions:
+        context += "Decisions they're a contributor on: " + "; ".join(d.get("title", "") for d in recent_decisions) + "\n"
+    if not individual_goal and not recent_decisions:
+        context += "No individual goal is assigned to them, and no decisions list them as a contributor.\n"
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=768,
+        system=(
+            "You decide whether there is real, specific work to ask this person about, based ONLY on "
+            "the goal/decision context given. If they have no individual goal and no recent "
+            "contributed decisions, set has_work_to_capture to false rather than asking generic "
+            "'what are your current priorities'-style questions — that produces meaningless answers "
+            "and wastes the person's time. If there IS real context, write 2-3 short, specific "
+            "questions that name the actual goal or decision by title, not generic filler."
+        ),
+        tools=[GENERATE_STORY_QUESTIONS_SCHEMA],
+        tool_choice={"type": "tool", "name": "submit_story_questions"},
+        messages=[{"role": "user", "content": context}],
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_story_questions":
+            return block.input
+    raise RuntimeError("Claude did not return the expected submit_story_questions tool call.")
+
+
+class StoryQuestionsRequest(BaseModel):
+    persona: PersonaIn
+    individual_goal: Optional[GoalIn] = None
+    recent_decisions: list[DecisionIn] = []
+
+
+@router.post("/complete-story/questions")
+def complete_story_questions(req: StoryQuestionsRequest):
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    try:
+        return generate_story_questions(
+            req.persona.model_dump(),
+            req.individual_goal.model_dump() if req.individual_goal else None,
+            [d.model_dump() for d in req.recent_decisions],
+        )
+    except Exception as e:
+        _log_and_raise_502("complete-story/questions", e)
 
 
 class StoryExtractRequest(BaseModel):

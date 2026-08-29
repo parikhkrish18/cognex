@@ -1239,9 +1239,6 @@
       ],
     };
   }
-  function storyFor(company, persona) {
-    return (company.stories && company.stories[persona.id]) || genericStoryFor(persona);
-  }
 
   function findAccountByEmail(email) {
     email = (email || "").trim().toLowerCase();
@@ -1927,7 +1924,11 @@
     if (wasActive) cs.activeId = cs.threads[0].id;
     renderApp();
   }
-  function storyStateFor() { var k = sessionKey(); if (!state.story[k]) state.story[k] = { answers: {}, saved: false }; return state.story[k]; }
+  function storyStateFor() {
+    var k = sessionKey();
+    if (!state.story[k]) state.story[k] = { answers: {}, saved: false, questionsLoading: false, questionsLoaded: false, hasWork: null, story: null, offline: false };
+    return state.story[k];
+  }
 
   /* =====================================================================
      RENDERING — top-level shell switch
@@ -2717,9 +2718,67 @@
   /* ============ Complete the Story ============ */
   function renderStory() {
     var company = currentCompany(), p = currentPersona();
-    var story = storyFor(company, p);
     var ss = storyStateFor();
     var root = document.getElementById("story-root");
+
+    // Real signal this persona actually has something to talk about — an
+    // individual goal, or a decision they're a contributor on. Only fetch
+    // once per session (guarded by questionsLoading/questionsLoaded); this
+    // used to be a synchronous hardcoded "{title} — current priorities"
+    // template fired for literally every persona regardless of whether they
+    // had any real work to reference (that's why the CEO — who has no
+    // individual goal in the seed data — got asked the exact same generic
+    // questions as an intern). Now it's a real Claude call, grounded in the
+    // same goal/decision context the offboarding flow already uses, and it
+    // can honestly say there's nothing to ask about.
+    if (!ss.saved && !ss.questionsLoaded && !ss.questionsLoading) {
+      ss.questionsLoading = true;
+      var myGoal = individualGoalFor(company, p);
+      var myDecisions = company.decisions.filter(function (d) { return d.contributor && d.contributor.indexOf(p.name) !== -1; });
+      fetch("/api/complete-story/questions", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          persona: { id: p.id, name: p.name, title: p.title, level: p.level, dept: p.dept },
+          individual_goal: myGoal || null,
+          recent_decisions: myDecisions,
+        }),
+      }).then(function (res) { if (!res.ok) throw new Error("backend unavailable (" + res.status + ")"); return res.json(); })
+        .then(function (data) {
+          ss.hasWork = !!data.has_work_to_capture;
+          ss.story = ss.hasWork ? { workItem: data.work_item_label, questions: data.questions } : null;
+          ss.offline = false;
+          ss.questionsLoading = false; ss.questionsLoaded = true;
+          renderStory();
+        }).catch(function () {
+          // Real backend unreachable — fall back to the honest local
+          // heuristic: only show the generic template if there's at least a
+          // real signal (an individual goal or a contributed decision);
+          // otherwise say plainly there's nothing to ask about, matching
+          // what the real model call would say, rather than always firing
+          // the same generic questions regardless of role.
+          var hasSignal = !!myGoal || myDecisions.length > 0;
+          ss.hasWork = hasSignal;
+          ss.story = hasSignal ? genericStoryFor(p) : null;
+          ss.offline = true;
+          ss.questionsLoading = false; ss.questionsLoaded = true;
+          renderStory();
+        });
+    }
+
+    if (!ss.saved && ss.questionsLoading) {
+      root.innerHTML = '<div class="empty-decisions">Checking whether there\'s something real to ask you about…</div>';
+      return;
+    }
+    if (!ss.saved && !ss.hasWork) {
+      root.innerHTML = '<div class="empty-decisions">' +
+        '<div style="font-weight:600;color:var(--ink);margin-bottom:6px">Nothing specific to capture right now</div>' +
+        '<div>' + esc(p.name) + " doesn't currently have an individual goal or a recent decision on file to ask about — Complete the Story only asks when there's something real to reference, not a generic prompt. Once " +
+        (p.dept ? "there's a tracked goal or decision" : "that changes") + ", this will have something specific to ask." +
+        (ss.offline ? ' <span class="badge badge-neutral">Offline demo mode</span>' : "") + "</div></div>";
+      return;
+    }
+
+    var story = ss.story || genericStoryFor(p);
     var count = Object.keys(ss.answers).length;
     var total = story.questions.length;
 
@@ -2795,13 +2854,16 @@
     var viewBtn = document.getElementById("story-view");
     if (viewBtn) viewBtn.addEventListener("click", function () { state.tab = "decisions"; renderTabs(); });
     var againBtn = document.getElementById("story-again");
-    if (againBtn) againBtn.addEventListener("click", function () { state.story[sessionKey()] = { answers: {}, saved: false }; renderStory(); });
+    if (againBtn) againBtn.addEventListener("click", function () {
+      state.story[sessionKey()] = { answers: {}, saved: false, questionsLoading: false, questionsLoaded: false, hasWork: null, story: null, offline: false };
+      renderStory();
+    });
   }
   function submitStoryAnswer(text) {
     if (!text || !text.trim()) return;
-    var company = currentCompany(), p = currentPersona();
     var ss = storyStateFor();
-    var story = storyFor(company, p);
+    var story = ss.story;
+    if (!story) return;
     var q = story.questions[Object.keys(ss.answers).length];
     if (!q) return;
     ss.answers[q.field] = text.trim();
@@ -2810,7 +2872,8 @@
   function saveStoryToMemory() {
     var company = currentCompany(), p = currentPersona();
     var ss = storyStateFor();
-    var story = storyFor(company, p);
+    var story = ss.story;
+    if (!story) return;
     var draft = ss.draft || { why: [ss.answers.why || ""], risks: [ss.answers.risk || ""], contributor_note: ss.answers.who || "", suggested_tags: [] };
     var dateStr = new Date().toISOString().slice(0, 10);
     storyCounter += 1;
