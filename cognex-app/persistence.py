@@ -33,6 +33,12 @@ router = APIRouter(prefix="/api/v2")
 
 DEMO_PASSWORD = "cognex"
 STAFF_EMAIL = "admin@cognex.ai"
+# Staff sign-in gets its own password, separate from the shared per-company
+# demo password above — the frontend's staff-sign-in modal never displays it
+# (no prefilled prompt, no footnote), unlike the regular login screen, which
+# does show DEMO_PASSWORD on screen as an explicit "this demo isn't really
+# authenticated" disclosure.
+STAFF_PASSWORD = "Admin@Cognex"
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +141,7 @@ class LoginRequest(BaseModel):
 def login(req: LoginRequest):
     email = req.email.strip().lower()
     if email == STAFF_EMAIL:
-        if req.password != DEMO_PASSWORD:
+        if req.password != STAFF_PASSWORD:
             raise HTTPException(status_code=401, detail="Incorrect password for Cognex staff.")
         return {"type": "platform"}
 

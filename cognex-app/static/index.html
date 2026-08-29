@@ -782,6 +782,11 @@
   <div class="center-card" id="login-card"></div>
 </div>
 
+<!-- ============ Cognex staff sign-in modal (password only — no email/credentials shown) ============ -->
+<div id="staff-login-modal" class="modal-overlay">
+  <div class="modal-card" id="staff-login-modal-card" style="max-width:400px"></div>
+</div>
+
 <!-- ============ Onboarding wizard shell ============ -->
 <div id="onboarding-shell" class="center-shell" style="display:none">
   <div class="center-card" id="onboarding-card"></div>
@@ -934,6 +939,11 @@
   "use strict";
 
   var DEMO_PASSWORD = "cognex";
+  // Staff sign-in uses its own dedicated password, never shown in the UI —
+  // the button opens a password-only modal rather than exposing the staff
+  // email/password pair the way the old prompt()-based flow did.
+  var STAFF_EMAIL = "admin@cognex.ai";
+  var STAFF_PASSWORD = "Admin@Cognex";
 
   /* ============ Levels ============ */
   var LEVEL = { intern: 1, employee: 2, manager: 3, director: 4, exec: 5, ceo: 6 };
@@ -1944,8 +1954,8 @@
       if (!email || !password) { ui.loginError = "Enter both an email and a password."; renderShell(); return; }
 
       function loginLocally() {
-        if (email.trim().toLowerCase() === "admin@cognex.ai") {
-          if (password !== DEMO_PASSWORD) { ui.loginError = "Incorrect password for Cognex staff. Demo password is " + DEMO_PASSWORD + "."; renderShell(); return; }
+        if (email.trim().toLowerCase() === STAFF_EMAIL) {
+          if (password !== STAFF_PASSWORD) { ui.loginError = "Incorrect password for Cognex staff."; renderShell(); return; }
           ui.loginError = ""; session = { type: "platform" }; renderShell(); return;
         }
         var found = findAccountByEmail(email);
@@ -1992,20 +2002,75 @@
         renderShell();
       });
     });
-    document.getElementById("go-staff").addEventListener("click", function () {
-      var email = prompt("Cognex staff email:", "admin@cognex.ai");
-      if (email === null) return;
-      var password = prompt("Password (demo password is '" + DEMO_PASSWORD + "'):", "");
-      if (password === null) return;
-      if (email.trim().toLowerCase() === "admin@cognex.ai" && password === DEMO_PASSWORD) {
-        session = { type: "platform" }; renderShell();
-      } else {
-        alert("That's not a recognized staff account in this demo.");
-      }
-    });
+    document.getElementById("go-staff").addEventListener("click", openStaffLoginModal);
     document.getElementById("back-to-landing").addEventListener("click", function () {
       ui.showLogin = false; ui.loginError = ""; renderShell();
     });
+  }
+
+  /* =====================================================================
+     COGNEX STAFF SIGN-IN MODAL
+     Password-only by design: staff sign-in isn't a normal account, so the
+     UI never shows the staff email or the password anywhere (no prefilled
+     prompt(), no footnote revealing it) — a person only gets in by actually
+     knowing the password. Replaces the old two-prompt() flow.
+  ===================================================================== */
+  function openStaffLoginModal() {
+    ui.staffLoginError = "";
+    renderStaffLoginModal();
+    document.getElementById("staff-login-modal").style.display = "flex";
+    var input = document.getElementById("staff-login-password");
+    if (input) input.focus();
+  }
+
+  function closeStaffLoginModal() {
+    document.getElementById("staff-login-modal").style.display = "none";
+  }
+
+  function renderStaffLoginModal() {
+    var card = document.getElementById("staff-login-modal-card");
+    card.innerHTML =
+      '<div class="screen-title">Cognex staff sign-in</div>' +
+      '<div class="screen-sub">Staff access only.</div>' +
+      '<form id="staff-login-form">' +
+      '<div class="field"><label>Password</label><input type="password" id="staff-login-password" placeholder="••••••••" autocomplete="current-password" autofocus /></div>' +
+      (ui.staffLoginError ? '<div class="field-error">' + esc(ui.staffLoginError) + "</div>" : "") +
+      '<button type="submit" class="btn-primary btn-block" style="margin-top:6px">Sign in</button>' +
+      '<button type="button" class="link-btn" id="staff-login-cancel" style="width:100%;text-align:center;margin-top:12px;font-size:12.5px">Cancel</button>' +
+      "</form>";
+
+    document.getElementById("staff-login-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var password = document.getElementById("staff-login-password").value;
+      if (!password) { ui.staffLoginError = "Enter the staff password."; renderStaffLoginModal(); return; }
+
+      function signInLocally() {
+        if (password !== STAFF_PASSWORD) { ui.staffLoginError = "Incorrect password."; renderStaffLoginModal(); return; }
+        closeStaffLoginModal();
+        ui.loginError = ""; session = { type: "platform" }; renderShell();
+      }
+
+      // Same graceful-degradation pattern as the main login form: try the
+      // real backend first, and only fall back to the local check if the
+      // backend itself is unreachable. A 401 from a reachable server is
+      // authoritative.
+      fetch("/api/v2/login", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: STAFF_EMAIL, password: password }),
+      }).then(function (res) {
+        if (res.status === 401) throw { authoritative: true };
+        if (!res.ok) throw { authoritative: false };
+        return res.json();
+      }).then(function (result) {
+        closeStaffLoginModal();
+        ui.loginError = ""; session = { type: "platform" }; renderShell();
+      }).catch(function (err) {
+        if (err && err.authoritative) { ui.staffLoginError = "Incorrect password."; renderStaffLoginModal(); return; }
+        signInLocally();
+      });
+    });
+
+    document.getElementById("staff-login-cancel").addEventListener("click", closeStaffLoginModal);
   }
 
   /* =====================================================================
@@ -3444,6 +3509,9 @@
   });
   document.getElementById("demo-modal").addEventListener("click", function (e) {
     if (e.target === this) closeDemoModal();
+  });
+  document.getElementById("staff-login-modal").addEventListener("click", function (e) {
+    if (e.target === this) closeStaffLoginModal();
   });
 
   renderProof();
