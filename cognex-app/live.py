@@ -51,13 +51,25 @@ MAX_TOOL_ROUNDS = 8
 #
 # max_uses=5 bounds worst-case web search cost per turn ($10/1,000 searches,
 # per Anthropic's pricing docs, plus normal token cost for retrieved pages).
-# Paired with a web_search version >= 20260209, Anthropic does not separately
-# bill code_execution time at all (only standard token costs apply) per their
-# current docs — worth re-checking if that changes, but as of this writing
-# adding real computation/charts here has no meaningful extra infra cost on
-# top of the web search cost already budgeted.
+#
+# IMPORTANT: web_search is pinned to the 20250305 (basic) version deliberately,
+# NOT the newer 20260209+/20260318 versions. Anthropic's newer web_search
+# versions add "dynamic filtering" — they auto-provision their OWN internal
+# code_execution tool to filter search results before they reach the context
+# window. If we ALSO declare our own code_execution tool (which we need, for
+# genuine user-requested computation/charts, not just search-result
+# filtering), the API rejects the request outright: "Auto-injecting tools
+# would conflict with existing tool names: ['code_execution']" — hit this
+# live in production on 2026-08-29 (see that build-log entry). Using the
+# basic web_search version avoids the auto-injection entirely, so our
+# explicit code_execution tool is the only one and stays a general-purpose
+# tool Claude can invoke for anything, not just search filtering. Trade-off:
+# with this version pairing, code_execution is billed normally (by execution
+# time, 5-minute minimum per invocation) rather than being free — but
+# Anthropic's free tier (1,550 container-hours/month per org, per their
+# pricing docs) should comfortably cover this app's realistic usage.
 SERVER_TOOLS = [
-    {"type": "web_search_20260318", "name": "web_search", "max_uses": 5},
+    {"type": "web_search_20250305", "name": "web_search", "max_uses": 5},
     {"type": "code_execution_20250825", "name": "code_execution"},
 ]
 
@@ -397,6 +409,22 @@ def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message:
 # ---------------------------------------------------------------------------
 # FastAPI router
 # ---------------------------------------------------------------------------
+def _log_and_raise_502(label: str, e: Exception):
+    """Print the real upstream exception server-side (visible via `railway
+    logs` / the Railway dashboard) before turning it into a client-facing
+    502. Previously the except blocks below only put the error in the HTTP
+    response body — invisible in server logs, which made a genuine upstream
+    failure (an unsupported/misconfigured tool, an invalid or unauthorized
+    API key, a real Anthropic-side error) indistinguishable from "we can't
+    tell what broke" from the outside. Added 2026-08-29 after exactly that
+    happened investigating why Ask Cognex was silently falling back to its
+    offline demo mode in production — see that build-log entry."""
+    import traceback
+    print(f"[{label}] Model call failed: {e!r}", flush=True)
+    traceback.print_exc()
+    raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+
+
 router = APIRouter(prefix="/api")
 
 
@@ -486,8 +514,8 @@ def ask(req: AskRequest):
     goals = [Goal(**g.model_dump()) for g in req.goals]
     try:
         return run_agent_turn(persona, decisions, goals, req.message, req.history)
-    except Exception as e:  # surface upstream Claude/API errors legibly rather than a bare 500
-        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+    except Exception as e:
+        _log_and_raise_502("ask", e)
 
 
 class StoryExtractRequest(BaseModel):
@@ -503,7 +531,7 @@ def complete_story_extract(req: StoryExtractRequest):
     try:
         return draft_decision_from_story(req.work_item, req.qa_pairs)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+        _log_and_raise_502("complete-story/extract", e)
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +694,7 @@ def offboarding_questions(req: OffboardingQuestionsRequest):
         )
         return {"questions": questions}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+        _log_and_raise_502("offboarding/questions", e)
 
 
 class OffboardingExtractRequest(BaseModel):
@@ -681,7 +709,7 @@ def offboarding_extract(req: OffboardingExtractRequest):
     try:
         return extract_handoff_report(req.persona.model_dump(), req.qa_pairs)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+        _log_and_raise_502("offboarding/extract", e)
 
 
 # ---------------------------------------------------------------------------
@@ -778,7 +806,7 @@ def vantage_scan(req: VantageScanRequest):
         gaps = polish_vantage_gaps(req.persona.model_dump(), [c.model_dump() for c in req.candidates])
         return {"gaps": gaps}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+        _log_and_raise_502("vantage/scan", e)
 
 
 class DelegateCandidateIn(BaseModel):
@@ -802,4 +830,4 @@ def offboarding_suggest_delegates(req: SuggestDelegatesRequest):
         suggestions = suggest_delegates(req.items, [c.model_dump() for c in req.candidates])
         return {"suggestions": suggestions}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Model call failed: {e}")
+        _log_and_raise_502("offboarding/suggest-delegates", e)
