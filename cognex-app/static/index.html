@@ -294,8 +294,10 @@
   .panel-pad { padding: 24px; }
   @media (max-width: 640px) { .panel-pad { padding: 18px; } .content-wrap { padding: 20px 16px 48px; } }
 
-  /* Ask Cognex — chat pane, docked composer, like a familiar AI chat window */
-  .chat-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  /* Ask Cognex — chat pane (message list + composer) plus an optional output
+     panel alongside it for generated charts/files, like a real AI workspace. */
+  .chat-pane { flex: 1; min-height: 0; display: flex; flex-direction: row; overflow: hidden; }
+  .chat-pane-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .chat-scroll { flex: 1; overflow-y: auto; }
   .chat-inner { max-width: 720px; margin: 0 auto; padding: 28px 24px 16px; }
   .chat-welcome { padding: 40px 4px 8px; }
@@ -314,6 +316,24 @@
   .composer-send { flex: none; width: 34px; height: 34px; border-radius: 50%; border: none; background: var(--ink); color: #fff; font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
   .composer-send:hover { background: #3a3a3c; }
   .chat-log { display: flex; flex-direction: column; gap: 22px; }
+  .msg-view-output-btn { border: none; background: var(--surface-2); color: var(--ink-soft); border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; margin-left: 8px; }
+  .msg-view-output-btn:hover { background: var(--surface-3); color: var(--ink); }
+
+  /* Output panel — where a generated chart/file from code execution renders,
+     next to the chat rather than pasted as text into the message itself. */
+  .output-panel { flex: none; width: 380px; min-width: 320px; border-left: 1px solid var(--border-soft); background: var(--bg-soft); display: flex; flex-direction: column; }
+  @media (max-width: 900px) { .output-panel { position: fixed; inset: 0; width: 100%; z-index: 55; } }
+  .output-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border-soft); background: var(--bg); flex: none; }
+  .output-panel-title { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .output-panel-close { flex: none; border: none; background: none; color: var(--ink-faint); cursor: pointer; font-size: 16px; padding: 4px; line-height: 1; }
+  .output-panel-close:hover { color: var(--ink); }
+  .output-panel-body { flex: 1; overflow-y: auto; padding: 18px; }
+  .output-file-card { border: 1px solid var(--border-soft); border-radius: 12px; padding: 14px; margin-bottom: 14px; background: var(--surface); }
+  .output-file-card img { display: block; width: 100%; border-radius: 8px; margin-bottom: 10px; }
+  .output-file-card .fname { font-size: 12.5px; font-weight: 600; word-break: break-word; margin-bottom: 4px; }
+  .output-file-card .fmeta { font-size: 11.5px; color: var(--ink-faint); margin-bottom: 10px; }
+  .output-file-card .fdownload { display: inline-block; font-size: 12.5px; font-weight: 600; color: var(--accent-ink); text-decoration: none; }
+  .output-file-card .fdownload:hover { text-decoration: underline; }
   .msg-user { align-self: flex-end; background: var(--surface-3); color: var(--ink); padding: 10px 15px; border-radius: 18px 18px 4px 18px; font-size: 14.5px; max-width: 80%; }
   .msg-block { display: flex; flex-direction: column; gap: 10px; }
   .msg-cognex { padding: 0 2px; max-width: 100%; }
@@ -872,19 +892,28 @@
       </div>
 
       <div class="chat-pane" id="tab-ask">
-        <div class="chat-scroll" id="chat-scroll">
-          <div class="chat-inner">
-            <div class="chat-log" id="chat-log"></div>
-          </div>
-        </div>
-        <div class="composer-dock">
-          <div class="composer-inner">
-            <div class="chips" id="ask-chips"></div>
-            <div class="composer">
-              <input type="text" id="ask-input" placeholder="Ask anything — try “why did we decide not to enter Germany?”" />
-              <button id="ask-send" class="composer-send" aria-label="Send">➤</button>
+        <div class="chat-pane-main">
+          <div class="chat-scroll" id="chat-scroll">
+            <div class="chat-inner">
+              <div class="chat-log" id="chat-log"></div>
             </div>
           </div>
+          <div class="composer-dock">
+            <div class="composer-inner">
+              <div class="chips" id="ask-chips"></div>
+              <div class="composer">
+                <input type="text" id="ask-input" placeholder="Ask anything — try “why did we decide not to enter Germany?”" />
+                <button id="ask-send" class="composer-send" aria-label="Send">➤</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="output-panel" id="output-panel" style="display:none">
+          <div class="output-panel-head">
+            <div class="output-panel-title" id="output-panel-title">Generated output</div>
+            <button class="output-panel-close" id="output-panel-close" aria-label="Close output panel">✕</button>
+          </div>
+          <div class="output-panel-body" id="output-panel-body"></div>
         </div>
       </div>
 
@@ -1867,6 +1896,7 @@
   }
   function chatFor() { return activeThread().turns; }
   function startNewChat() {
+    closeOutputPanel();
     var cs = chatStateFor();
     var active = activeThread();
     // Reuse an already-empty "New chat" rather than stacking up blank threads.
@@ -1878,6 +1908,7 @@
     renderApp();
   }
   function switchThread(id) {
+    closeOutputPanel();
     var cs = chatStateFor();
     cs.activeId = id;
     state.tab = "ask";
@@ -1912,7 +1943,7 @@
     if (session.type === "platform") { renderPlatform(); document.getElementById("platform-shell").style.display = "block"; return; }
     if (session.type === "company") {
       var c = currentCompany(), p = currentPersona();
-      if (c && p) { document.getElementById("app-shell").style.display = "block"; renderApp(); return; }
+      if (c && p) { document.getElementById("app-shell").style.display = "flex"; renderApp(); return; }
     }
     if (!ui.showLogin) { document.getElementById("landing-shell").style.display = "block"; return; }
     renderLogin();
@@ -2451,9 +2482,13 @@
       // A quick way to turn any chat answer into a real Decision Memory entry —
       // so running several parallel chat threads still feeds the same company
       // brain instead of scattering useful context across throwaway chats.
-      var actionsHtml = turn.savedToMemory
-        ? '<div class="msg-actions"><span class="msg-saved">✓ Saved to Decision Memory</span></div>'
-        : '<div class="msg-actions"><button class="msg-save-btn" data-save-turn="' + idx + '">+ Save to Decision Memory</button></div>';
+      var saveHtml = turn.savedToMemory
+        ? '<span class="msg-saved">✓ Saved to Decision Memory</span>'
+        : '<button class="msg-save-btn" data-save-turn="' + idx + '">+ Save to Decision Memory</button>';
+      var outputHtml = (turn.a.files && turn.a.files.length)
+        ? '<button class="msg-view-output-btn" data-view-output="' + idx + '">📎 View output (' + turn.a.files.length + ')</button>'
+        : "";
+      var actionsHtml = '<div class="msg-actions">' + saveHtml + outputHtml + "</div>";
       block.innerHTML = '<div class="msg-cognex"><div class="who"><div class="avatar sm" style="background:var(--accent-soft);color:var(--accent-ink)">C</div><span class="name">Cognex</span>' +
         modeBadge + "</div>" +
         '<div class="body">' + turn.a.text + "</div>" + srcHtml + actionsHtml + "</div>";
@@ -2513,6 +2548,32 @@
     });
     return lines;
   }
+  /* ============ Output panel — charts/files code execution generates ============ */
+  function fileIsImage(f) { return !!(f.mimeType && f.mimeType.indexOf("image/") === 0); }
+  function formatFileSize(bytes) {
+    if (bytes === null || bytes === undefined) return "";
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+  function openOutputPanel(turn) {
+    var files = (turn && turn.a && turn.a.files) || [];
+    if (!files.length) return;
+    document.getElementById("output-panel-title").textContent = turn.q.length > 46 ? turn.q.slice(0, 46) + "…" : turn.q;
+    document.getElementById("output-panel-body").innerHTML = files.map(function (f) {
+      var preview = fileIsImage(f) ? '<img src="/api/files/' + encodeURIComponent(f.id) + '" alt="' + esc(f.filename || "generated output") + '" />' : "";
+      return '<div class="output-file-card">' + preview +
+        '<div class="fname">' + esc(f.filename || "output") + "</div>" +
+        '<div class="fmeta">' + esc(f.mimeType || "") + (f.sizeBytes ? " · " + formatFileSize(f.sizeBytes) : "") + "</div>" +
+        '<a class="fdownload" href="/api/files/' + encodeURIComponent(f.id) + '" download="' + esc(f.filename || "output") + '">Download →</a>' +
+        "</div>";
+    }).join("");
+    document.getElementById("output-panel").style.display = "flex";
+  }
+  function closeOutputPanel() {
+    document.getElementById("output-panel").style.display = "none";
+  }
+
   function submitQuestion(q) {
     if (!q || !q.trim()) return;
     var company = currentCompany(), p = currentPersona();
@@ -2555,9 +2616,10 @@
           if (item && item.id && item.access && item.access !== "source") logAccessLedger(company, p, item.id, item.title || item.id, item.access, "Ask Cognex");
         });
       });
-      turn.a = { text: renderRichText(data.answer), raw: data.answer, sources: sourcesFromToolCalls(data.tool_calls), live: true };
+      turn.a = { text: renderRichText(data.answer), raw: data.answer, sources: sourcesFromToolCalls(data.tool_calls), files: data.files || [], live: true };
       turn.pending = false;
       renderChatLog();
+      if (turn.a.files.length) openOutputPanel(turn);
     }).catch(function () {
       // Real backend unreachable, or ANTHROPIC_API_KEY isn't configured yet on the
       // server — fall back to the local rule-based engine so the demo still works
@@ -3478,12 +3540,16 @@
     }
     var saveBtn = e.target.closest("[data-save-turn]");
     if (saveBtn) { saveChatTurnToMemory(parseInt(saveBtn.getAttribute("data-save-turn"), 10)); return; }
+    var viewBtn = e.target.closest("[data-view-output]");
+    if (viewBtn) { openOutputPanel(chatFor()[parseInt(viewBtn.getAttribute("data-view-output"), 10)]); return; }
   });
+  document.getElementById("output-panel-close").addEventListener("click", closeOutputPanel);
   document.getElementById("nav-newchat-btn").addEventListener("click", startNewChat);
   document.getElementById("tabs").addEventListener("click", function (e) {
     var btn = e.target.closest(".tab-btn");
     if (!btn || btn.style.display === "none") return;
     state.tab = btn.getAttribute("data-tab");
+    if (state.tab !== "ask") closeOutputPanel();
     if (state.tab === "decisions") {
       var company = currentCompany(), p = currentPersona();
       if (company && p) logDecisionMemoryAccess(company, p);

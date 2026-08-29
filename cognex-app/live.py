@@ -34,10 +34,32 @@ from typing import Optional
 
 from anthropic import Anthropic
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
-MAX_TOOL_ROUNDS = 6
+MAX_TOOL_ROUNDS = 8
+
+# ---------------------------------------------------------------------------
+# Real web search + real code execution — added 2026-08-29 so Ask Cognex can
+# actually search the web and actually run numbers/build charts, instead of
+# only answering from the model's own knowledge and prose estimates. These
+# are Anthropic *server* tools: unlike search_decisions/get_decision/etc.
+# below (which we implement and execute ourselves), Anthropic's API executes
+# these itself and returns the result inline in the same response — see the
+# tool_use handling in run_agent_turn for why that changes the loop slightly.
+#
+# max_uses=5 bounds worst-case web search cost per turn ($10/1,000 searches,
+# per Anthropic's pricing docs, plus normal token cost for retrieved pages).
+# Paired with a web_search version >= 20260209, Anthropic does not separately
+# bill code_execution time at all (only standard token costs apply) per their
+# current docs — worth re-checking if that changes, but as of this writing
+# adding real computation/charts here has no meaningful extra infra cost on
+# top of the web search cost already budgeted.
+SERVER_TOOLS = [
+    {"type": "web_search_20260318", "name": "web_search", "max_uses": 5},
+    {"type": "code_execution_20250825", "name": "code_execution"},
+]
 
 LEVEL_LABEL = {1: "Company-wide", 2: "Employee+", 3: "Manager+", 4: "Director+", 5: "Executive", 6: "CEO only"}
 
@@ -251,6 +273,19 @@ working code with explanation when asked to write code, thorough research or doc
 asked for it. Do not artificially shorten an answer that deserves depth — match length and
 structure to what the question actually needs, not to a fixed target.
 
+You have two real capabilities beyond your own training, and you should reach for them whenever
+they would make an answer better rather than defaulting to a prose guess:
+- Web search: use it for anything current, time-sensitive, or better answered with a real source
+  (prices, news, a competitor's current product, a fact you're not fully certain of) — don't
+  guess at something searchable. Do NOT put confidential company details (decision content,
+  financial figures, names of people or deals) into a search query — search generically; if a
+  question genuinely needs company-internal information, use your company-memory tools below
+  instead of the web for that part.
+- Code execution (a real Python sandbox): use it whenever a question involves actual computation,
+  data analysis, or a chart — run the numbers for real instead of estimating them in prose, and
+  generate an actual chart image when a visualization would help instead of describing one in
+  words. If the person gives you data (pasted numbers, a table), work with it directly in code.
+
 You ALSO have privileged, permission-filtered access to this company's Decision Memory and Goal
 graph through your tools. Use them whenever a question is actually about this company's
 decisions, goals, or priorities, and ground that specific part of your answer in what a tool
@@ -259,11 +294,52 @@ company's goals are) that your tools didn't give you. Every tool call is automat
 to what this person is personally allowed to see; if a result says a record is restricted or
 only a derived summary is available, say so plainly instead of guessing at the full record. This
 grounding requirement applies specifically to company-internal facts — it does not apply to
-general knowledge, coding help, or open research, which you should answer from your own
-knowledge exactly as you normally would.
+general knowledge, web search results, coding help, or open research/computation, which you
+should answer using your own judgment and tools exactly as you normally would.
 
 When you do cite something retrieved from company memory, name what you retrieved so the person
-can see where it came from."""
+can see where it came from. When you cite something from a web search, name the source. When you
+compute or generate something with code, state the key numbers or say what the chart shows —
+don't just say "see attached." """
+
+
+def _extract_file_ids(content_blocks) -> list:
+    """Pull file_ids for anything code_execution generated (a chart image, a
+    CSV, etc.) out of a response's content blocks. Uses getattr-based duck
+    typing rather than strict isinstance checks against the SDK's typed
+    blocks, so a minor result-shape difference degrades to "no files found"
+    rather than a hard crash on an otherwise-good answer."""
+    ids = []
+    for block in content_blocks:
+        if getattr(block, "type", None) not in ("code_execution_tool_result", "bash_code_execution_tool_result"):
+            continue
+        result = getattr(block, "content", None)
+        items = getattr(result, "content", None)  # e.g. CodeExecutionResultBlock.content: List[CodeExecutionOutputBlock]
+        if not items:
+            continue
+        for item in items:
+            fid = getattr(item, "file_id", None)
+            if fid:
+                ids.append(fid)
+    return ids
+
+
+def _resolve_files(client, file_ids: list) -> list:
+    """Turn raw file_ids into {id, filename, mimeType, sizeBytes} the frontend
+    can render (an inline image for a chart, a download link otherwise) via
+    GET /api/files/{id}. A metadata lookup failure doesn't drop the file
+    entirely — the id is still usable — it just won't have a nice filename."""
+    files, seen = [], set()
+    for fid in file_ids:
+        if fid in seen:
+            continue
+        seen.add(fid)
+        try:
+            meta = client.files.retrieve_metadata(fid)
+            files.append({"id": fid, "filename": meta.filename, "mimeType": meta.mime_type, "sizeBytes": meta.size_bytes})
+        except Exception:
+            files.append({"id": fid, "filename": "output", "mimeType": "application/octet-stream", "sizeBytes": None})
+    return files
 
 
 def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message: str, history=None):
@@ -272,30 +348,49 @@ def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message:
     messages = list(history or [])
     messages.append({"role": "user", "content": user_message})
     tool_call_log = []
+    file_ids = []
+    all_tools = TOOL_SCHEMAS + SERVER_TOOLS
 
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.messages.create(
-            model=MODEL, max_tokens=4096, system=_system_prompt(persona),
-            tools=TOOL_SCHEMAS, tool_choice={"type": "auto"}, messages=messages,
+            model=MODEL, max_tokens=8192, system=_system_prompt(persona),
+            tools=all_tools, tool_choice={"type": "auto"}, messages=messages,
         )
+        file_ids.extend(_extract_file_ids(response.content))
+
         if response.stop_reason != "tool_use":
             final_text = "".join(block.text for block in response.content if block.type == "text")
-            return {"answer": final_text, "tool_calls": tool_call_log}
+            return {"answer": final_text, "tool_calls": tool_call_log, "files": _resolve_files(client, file_ids)}
 
         messages.append({"role": "assistant", "content": response.content})
         tool_results = []
         for block in response.content:
             if block.type != "tool_use":
                 continue
-            fn = impls.get(block.name)
-            result = fn(block.input) if fn else {"error": f"Unknown tool '{block.name}'"}
+            # web_search / code_execution are Anthropic SERVER tools: the API
+            # executes them itself and the result is already inline in this
+            # same response (the paired *_tool_result block above) — only our
+            # own tools (search_decisions, get_decision, ...) need a
+            # client-supplied tool_result fed back in the next round.
+            if block.name not in impls:
+                continue
+            fn = impls[block.name]
+            result = fn(block.input)
             tool_call_log.append({"name": block.name, "input": block.input, "result": result})
             tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)})
+
+        if not tool_results:
+            # Every tool_use block in this round was a server tool already
+            # resolved inline (stop_reason=="tool_use" should not normally
+            # happen in that case, but this keeps the loop from breaking if
+            # it ever does) — just let Claude continue from here.
+            continue
         messages.append({"role": "user", "content": tool_results})
 
     return {
         "answer": "I wasn't able to settle on an answer within the tool-call budget for this turn — try a narrower question.",
         "tool_calls": tool_call_log,
+        "files": _resolve_files(client, file_ids),
     }
 
 
@@ -352,6 +447,34 @@ class AskRequest(BaseModel):
 @router.get("/health")
 def health():
     return {"ok": True, "api_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY"))}
+
+
+@router.get("/files/{file_id}")
+def get_generated_file(file_id: str):
+    """Streams back a file code_execution generated (a chart image, a CSV,
+    etc.) by proxying Anthropic's Files API through our own server API key —
+    the frontend never talks to Anthropic directly. NOTE on scope: like the
+    rest of this app, this isn't access-controlled per company/persona (any
+    caller who has a file_id can fetch it) — that's consistent with this
+    app's documented "no real auth yet" state (see the persistence build-log
+    entry) and these ids are opaque, short-lived, and only ever handed to the
+    same session that asked the question that generated them. Real per-user
+    file access control is part of the same future "real authentication"
+    phase already tracked for the rest of the app."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    client = Anthropic()
+    try:
+        meta = client.files.retrieve_metadata(file_id)
+        binary = client.files.download(file_id)
+        content = binary.read()
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Could not fetch file '{file_id}': {e}")
+    return Response(
+        content=content,
+        media_type=meta.mime_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{meta.filename or file_id}"'},
+    )
 
 
 @router.post("/ask")
