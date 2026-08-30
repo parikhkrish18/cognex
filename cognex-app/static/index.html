@@ -239,7 +239,25 @@
   .nav-newchat-btn:hover { border-color: var(--ink-faint); background: var(--surface-2); }
   .nav-newchat-btn .plus { font-size: 15px; line-height: 1; }
   .nav-section-label { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); padding: 14px 16px 6px; }
-  .nav-threads { display: flex; flex-direction: column; gap: 1px; padding: 0 8px; max-height: 240px; overflow-y: auto; }
+  /* flex-shrink: 0 is load-bearing here, not decoration. .nav-threads sits
+     inside .nav-rail's column flex layout, and because .nav-threads has its
+     own overflow-y: auto, the CSS flexbox spec gives it an automatic
+     min-height of 0 (an element with its own overflow set opts out of the
+     usual "min-height = content size" default) -- so the instant the rest
+     of the sidebar's content is tall enough to need any shrinking, the flex
+     algorithm shrinks THIS item first and hardest, collapsing it to a
+     literal 0px-tall box while its thread rows still render in normal flow
+     past that 0-height box, overlapping the "Workspace" label and
+     everything below it. The rows were visible but not really "there" --
+     clicking one actually hit whatever sat at that position instead
+     (confirmed via getBoundingClientRect: the container measured height 0
+     while its own children's rects extended ~70px past it). This is what
+     made switching between chats look broken/unresponsive once there was
+     more than one thread. flex-shrink: 0 stops the collapse; the box still
+     obeys its own max-height + overflow-y: auto for a long chat list, and
+     the whole sidebar still scrolls via .nav-rail's own overflow-y: auto
+     if total content is taller than the viewport. */
+  .nav-threads { display: flex; flex-direction: column; gap: 1px; padding: 0 8px; max-height: 240px; overflow-y: auto; flex-shrink: 0; }
   .nav-thread-row { display: flex; align-items: center; gap: 4px; width: 100%; padding: 1px; border-radius: 8px; cursor: pointer; color: var(--ink-soft); }
   .nav-thread-row:hover { background: var(--surface-2); }
   .nav-thread-row.active { background: var(--surface-3); color: var(--ink); }
@@ -340,6 +358,17 @@
   .msg-cognex .who { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
   .msg-cognex .who .name { font-weight: 600; font-size: 12.5px; }
   .msg-cognex .body { font-size: 14.5px; color: var(--ink); }
+  /* Live status ("Searching the web…") + typing cursor — added 2026-08-29
+     so a turn in flight reads as actively working instead of a frozen
+     spinner. The pulse animation on .stream-status is what keeps a status
+     line that hasn't changed in a second or two from reading as "stuck" —
+     Claude's own thinking indicator has the same "still alive" cue. */
+  .stream-status { font-size: 13px; color: var(--ink-faint); display: flex; align-items: center; gap: 7px; margin-bottom: 2px; }
+  .stream-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-ink); flex: none; animation: streamPulse 1.1s ease-in-out infinite; }
+  @keyframes streamPulse { 0%, 100% { opacity: 0.25; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
+  .stream-body { white-space: pre-wrap; }
+  .stream-body.streaming-cursor::after { content: "▍"; display: inline-block; margin-left: 1px; color: var(--accent-ink); animation: streamCursor 0.85s steps(1) infinite; }
+  @keyframes streamCursor { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
   .msg-cognex .body em { color: var(--accent-ink); font-style: normal; }
   .msg-cognex .body p { margin: 0 0 10px; }
   .msg-cognex .body p:last-child { margin-bottom: 0; }
@@ -994,6 +1023,35 @@
   function tokenize(s) {
     return s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
   }
+  var STOPWORDS = ("the a an and or but if then so to of in on for with as at by from up down "
+    + "into over under about is are was were be been being have has had do does did will would "
+    + "could should can may might must this that these those it its it's i you we they he she "
+    + "them him her us our your their what which who whom how when where why not no yes all "
+    + "any some more most other such only own same too very just also there here out get gets "
+    + "getting search up everything know save saved saving company info information").split(" ").reduce(function (acc, w) { acc[w] = true; return acc; }, {});
+  // Picks the most distinctive words out of one or more pieces of text —
+  // used to auto-tag a saved chat turn from BOTH the question and the
+  // answer, not just the question. Added 2026-08-29: a decision saved via
+  // "Save to Decision Memory" previously tagged itself using only the
+  // first 6 words of the QUESTION that triggered the save (e.g. "search up
+  // everything there is to" for "search up everything there is to know
+  // about arviahstudio.com and save it as our company info") — mostly
+  // filler words, and none of them the actual subject. A later,
+  // differently-worded question ("how can we get new customers") then had
+  // no tag overlap at all with a decision that in fact contained the
+  // answer. This ranks words by frequency across the given texts, drops
+  // stopwords and short words, and keeps the ones that actually say
+  // something a later search query is likely to use.
+  function keyTermsFrom(texts, n) {
+    var counts = {};
+    texts.forEach(function (t) {
+      tokenize(t || "").forEach(function (w) {
+        if (w.length <= 3 || STOPWORDS[w]) return;
+        counts[w] = (counts[w] || 0) + 1;
+      });
+    });
+    return Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, n || 8);
+  }
   function slugify(s) {
     var base = s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "company";
     var id = base, n = 1;
@@ -1163,6 +1221,48 @@
       }
       return res.json();
     });
+  }
+  /* Reads a fetch Response body as Server-Sent Events, calling onEvent(obj)
+     for each `data: {...}` frame (frames are separated by a blank line —
+     see live.py's ask_stream, which writes exactly this format). This is
+     what turns POST /api/ask/stream into a live-typing answer instead of
+     one blocking JSON response: onEvent fires as each chunk of text (and
+     each tool-status change) actually arrives, not once at the very end.
+     Returns a promise that resolves once the stream closes normally. */
+  function readSSE(response, onEvent) {
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buf = "";
+    function pump() {
+      return reader.read().then(function (result) {
+        if (result.done) return;
+        buf += decoder.decode(result.value, { stream: true });
+        var frames = buf.split("\n\n");
+        buf = frames.pop(); // last chunk may be a partial frame — keep it for next read
+        frames.forEach(function (frame) {
+          var line = frame.split("\n").filter(function (l) { return l.indexOf("data: ") === 0; })[0];
+          if (!line) return;
+          // try/catch wraps ONLY the JSON.parse -- a malformed frame is
+          // skipped rather than breaking the stream. onEvent(...) itself is
+          // called OUTSIDE the try: submitQuestion deliberately throws from
+          // inside its onEvent callback to signal a server-sent "error"
+          // event, and that throw needs to propagate out of readSSE (so it
+          // rejects this promise and submitQuestion's .catch() can fall
+          // back to the offline engine) rather than being silently
+          // swallowed here — which is exactly what an earlier version of
+          // this function did: a real mid-stream failure just vanished,
+          // leaving the composer disabled and the turn stuck on "Searching
+          // the web…" forever. Caught by a real Playwright test against a
+          // mocked server that fails partway through a stream, not by
+          // inspection — worth remembering when touching this function.
+          var parsed;
+          try { parsed = JSON.parse(line.slice(6)); } catch (e) { return; }
+          onEvent(parsed);
+        });
+        return pump();
+      });
+    }
+    return pump();
   }
   function persistFireAndForget(promise) {
     if (promise && promise.catch) promise.catch(function (err) { console.warn("[cognex] persistence call failed:", err && err.message ? err.message : err); });
@@ -1868,15 +1968,82 @@
      each one can still be individually saved into Decision Memory (see
      saveChatTurnToMemory below) so the company brain keeps building regardless
      of how many threads someone has open. */
-  var threadCounter = 0;
   function newThreadObj() {
-    threadCounter += 1;
-    return { id: "thread-" + threadCounter, title: "New chat", turns: [] };
+    // Collision-resistant, not just incrementing a counter: threads are now
+    // persisted server-side (added 2026-08-29) via an upsert-by-id PUT, so
+    // an id that repeats across a reload would silently overwrite a
+    // completely different, older thread instead of creating a new one — a
+    // plain in-memory counter resets to 0 on every reload and would do
+    // exactly that. Timestamp + a random suffix is unique enough without
+    // needing a server round-trip just to mint an id, keeping the same
+    // "client mints its own id, server upserts" pattern already used for
+    // decisions/goals elsewhere in this app.
+    var id = "thread-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+    return { id: id, title: "New chat", turns: [] };
+  }
+  function threadsApiPath(companyId, personaId, threadId) {
+    var base = "/companies/" + encodeURIComponent(companyId) + "/personas/" + encodeURIComponent(personaId) + "/threads";
+    return threadId ? base + "/" + encodeURIComponent(threadId) : base;
+  }
+  function persistThread(companyId, personaId, thread) {
+    persistFireAndForget(apiV2("PUT", threadsApiPath(companyId, personaId, thread.id), {
+      title: thread.title, turns: thread.turns,
+    }));
+  }
+  function persistThreadDelete(companyId, personaId, threadId) {
+    persistFireAndForget(apiV2("DELETE", threadsApiPath(companyId, personaId, threadId)));
+  }
+  function loadThreadsFromServer(k) {
+    var parts = k.split("::"), companyId = parts[0], personaId = parts[1];
+    apiV2("GET", threadsApiPath(companyId, personaId)).then(function (data) {
+      var cs = state.chatByKey[k];
+      if (!cs) return;
+      cs.loadingFromServer = false;
+      cs.loadedFromServer = true;
+      var serverThreads = (data.threads || []).map(function (t) {
+        return { id: t.id, title: t.title, turns: t.turns || [] };
+      });
+      if (serverThreads.length) {
+        var pristine = cs.threads.length === 1 && cs.threads[0].turns.length === 0;
+        if (pristine) {
+          // The only local thread so far is the empty placeholder
+          // chatStateFor() creates synchronously before this async load can
+          // possibly return -- safe to replace wholesale so a returning
+          // session shows real history instead of a stray blank "New chat".
+          cs.threads = serverThreads;
+          cs.activeId = serverThreads[0].id;
+        } else {
+          // The person already started a real conversation locally before
+          // server history arrived (a brand-new company/persona, or a slow
+          // network) -- don't clobber it. Just add in whatever persisted
+          // threads aren't already present locally.
+          var localIds = {};
+          cs.threads.forEach(function (t) { localIds[t.id] = true; });
+          serverThreads.forEach(function (t) { if (!localIds[t.id]) cs.threads.push(t); });
+        }
+      }
+      if (session.type === "company" && sessionKey() === k) renderApp();
+    }).catch(function () {
+      // Real backend unreachable — keep whatever local-only thread state
+      // already exists and stop trying for this session (matches this
+      // app's established graceful-degradation pattern elsewhere).
+      var cs = state.chatByKey[k];
+      if (cs) { cs.loadingFromServer = false; cs.loadedFromServer = true; }
+    });
   }
   function chatStateFor() {
     var k = sessionKey();
-    if (!state.chatByKey[k]) state.chatByKey[k] = { threads: [], activeId: null };
+    if (!state.chatByKey[k]) state.chatByKey[k] = { threads: [], activeId: null, loadedFromServer: false, loadingFromServer: false };
     var cs = state.chatByKey[k];
+    // Fetch this persona's real chat history from the server the first
+    // time their session state is touched. Added 2026-08-29 — until now
+    // chat threads lived only in this in-memory object, wiped on every
+    // reload (index.html is served with Cache-Control: no-store), which is
+    // what the founder meant by "no saved chats at all."
+    if (k && !cs.loadedFromServer && !cs.loadingFromServer) {
+      cs.loadingFromServer = true;
+      loadThreadsFromServer(k);
+    }
     if (!cs.threads.length) {
       var t = newThreadObj();
       cs.threads.push(t);
@@ -1912,16 +2079,19 @@
     renderApp();
   }
   function deleteThread(id) {
+    var company = currentCompany(), p = currentPersona();
     var cs = chatStateFor();
     if (cs.threads.length <= 1) {
       var only = cs.threads[0];
       only.turns = []; only.title = "New chat";
+      if (company && p) persistThreadDelete(company.id, p.id, only.id);
       renderApp();
       return;
     }
     var wasActive = cs.activeId === id;
     cs.threads = cs.threads.filter(function (t) { return t.id !== id; });
     if (wasActive) cs.activeId = cs.threads[0].id;
+    if (company && p) persistThreadDelete(company.id, p.id, id);
     renderApp();
   }
   function storyStateFor() {
@@ -2464,8 +2634,19 @@
       var block = document.createElement("div");
       block.className = "msg-block";
       if (turn.pending) {
+        // Streaming state: a live status line (updated in place by
+        // updateStreamStatus/appendStreamText as SSE events arrive — see
+        // submitQuestion) plus whatever answer text has streamed in so far,
+        // with a blinking cursor while text is actively arriving. Stable
+        // ids (stream-status/stream-text) rather than per-turn ones: only
+        // one turn can be mid-stream at a time (the composer is disabled
+        // while a turn is in flight — see askBusy), and reusing fixed ids
+        // means a full renderChatLog() (e.g. from switching threads and
+        // back) picks up right where the accumulated turn state currently
+        // is, instead of needing to reconcile two different id schemes.
         block.innerHTML = '<div class="msg-cognex"><div class="who"><div class="avatar sm" style="background:var(--accent-soft);color:var(--accent-ink)">C</div><span class="name">Cognex</span></div>' +
-          '<div class="body" style="color:var(--ink-faint)">Thinking…</div></div>';
+          '<div class="stream-status" id="stream-status">' + esc(turn.statusLabel || "Thinking…") + '</div>' +
+          '<div class="body stream-body streaming-cursor" id="stream-text">' + esc(turn.a.text || "") + '</div></div>';
         log.appendChild(block);
         return;
       }
@@ -2511,10 +2692,26 @@
       id: "d-chat-" + company.id + "-" + p.id + "-" + storyCounter,
       title: turn.q.length > 80 ? turn.q.slice(0, 80) + "…" : turn.q,
       decided: dateStr, owner: p.name + " · " + p.title,
-      visibility: p.level, derivedLevel: LEVEL.intern,
+      // Company-wide by default, not the saver's own clearance level.
+      // Changed 2026-08-29 per the founder's explicit call: the whole point
+      // of "Save to Decision Memory" from an Ask Cognex chat is feeding
+      // shared company context (e.g. "what we sell") back into the same
+      // brain every other chat draws from -- defaulting to `p.level` meant
+      // that if the CEO (the highest clearance) saved something, only the
+      // CEO could ever see it again, which defeated the purpose for exactly
+      // the kind of foundational fact this feature exists to capture.
+      // Trade-off worth knowing: there's currently no UI (or backend field)
+      // to dial an individual saved decision's visibility back down after
+      // the fact -- update_decision() in persistence.py only supports
+      // editing `result`. So a save that turns out to be more sensitive
+      // than intended can't be re-restricted today; if that turns out to
+      // matter in practice, the fix is either a visibility selector at
+      // save time (the Slack candidate-confirm flow already has exactly
+      // this pattern to copy) or a real edit affordance on existing cards.
+      visibility: LEVEL.intern, derivedLevel: LEVEL.intern,
       why: [bodyText], alternatives: [], assumptions: [], risks: [],
       review: "Not yet scheduled", result: "Captured " + dateStr + " via Ask Cognex",
-      tags: tokenize(turn.q).slice(0, 6).concat([(p.dept || "").toLowerCase()]),
+      tags: keyTermsFrom([turn.q, bodyText], 8).concat([(p.dept || "").toLowerCase()]),
       derived: turn.q + " — context captured directly from " + p.name + "'s conversation with Cognex.",
       viaChat: true,
     };
@@ -2575,10 +2772,18 @@
     document.getElementById("output-panel").style.display = "none";
   }
 
+  var askBusy = false; // one turn streams at a time — see setComposerBusy
+  function setComposerBusy(busy) {
+    askBusy = busy;
+    var input = document.getElementById("ask-input"), send = document.getElementById("ask-send");
+    if (input) input.disabled = busy;
+    if (send) send.disabled = busy;
+  }
   function submitQuestion(q) {
-    if (!q || !q.trim()) return;
+    if (!q || !q.trim() || askBusy) return;
     var company = currentCompany(), p = currentPersona();
-    var chat = chatFor();
+    var thread = activeThread(); // captured now — persistence/rendering below target THIS thread even if the person switches away mid-stream
+    var chat = thread.turns;
     // Thread real conversation history to the model so follow-ups work ("now add
     // error handling to that") — only from prior LIVE turns, since an offline
     // rule-based fallback answer was never actually part of the model's context.
@@ -2588,15 +2793,44 @@
       history.push({ role: "user", content: t.q });
       history.push({ role: "assistant", content: t.a.raw });
     });
-    var turn = { q: q, a: { text: "", sources: [] }, pending: true };
+    var turn = { q: q, a: { text: "", sources: [] }, pending: true, statusLabel: "Thinking…" };
     chat.push(turn);
-    var th = activeThread();
-    if (th && th.title === "New chat") th.title = q.length > 42 ? q.slice(0, 42) + "…" : q;
+    if (thread.title === "New chat") thread.title = q.length > 42 ? q.slice(0, 42) + "…" : q;
     renderThreadList();
     document.getElementById("ask-chips").style.display = "none";
     renderChatLog();
+    setComposerBusy(true);
 
-    fetch("/api/ask", {
+    function isThreadOnScreen() {
+      // DOM updates during streaming should no-op once the person has
+      // switched to a different thread or tab — renderChatLog() will pick
+      // up wherever `turn` currently is the next time this thread is shown
+      // (see the streaming render branch above), so nothing is lost, it
+      // just isn't painted live while off-screen.
+      return state.tab === "ask" && activeThread() === thread;
+    }
+    function finishTurn() {
+      turn.pending = false;
+      setComposerBusy(false);
+      persistThread(company.id, p.id, thread);
+      if (isThreadOnScreen()) {
+        renderChatLog();
+        if (turn.a.files && turn.a.files.length) openOutputPanel(turn);
+      } else {
+        renderThreadList(); // still reflect the finished title/state in the sidebar
+      }
+    }
+    function fallbackToOffline() {
+      turn.a = answer(company, p, q);
+      turn.a.offline = true;
+      searchDecisions(company, q).forEach(function (d) {
+        var mode = decisionView(p, d);
+        if (mode !== "source") logAccessLedger(company, p, d.id, d.title, mode, "Ask Cognex (offline)");
+      });
+      finishTurn();
+    }
+
+    fetch("/api/ask/stream", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -2607,32 +2841,48 @@
         history: history,
       }),
     }).then(function (res) {
-      if (!res.ok) throw new Error("backend unavailable (" + res.status + ")");
-      return res.json();
-    }).then(function (data) {
-      (data.tool_calls || []).forEach(function (call) {
-        var r = call.result;
-        var items = Array.isArray(r) ? r : (r && typeof r === "object" ? [r] : []);
-        items.forEach(function (item) {
-          if (item && item.id && item.access && item.access !== "source") logAccessLedger(company, p, item.id, item.title || item.id, item.access, "Ask Cognex");
-        });
+      if (!res.ok || !res.body) throw new Error("backend unavailable (" + res.status + ")");
+      var sawAnyEvent = false;
+      return readSSE(res, function (evt) {
+        sawAnyEvent = true;
+        if (evt.event === "status") {
+          turn.statusLabel = evt.label;
+          if (isThreadOnScreen()) {
+            var statusEl = document.getElementById("stream-status");
+            if (statusEl) statusEl.textContent = evt.label;
+          }
+        } else if (evt.event === "text") {
+          turn.a.text = (turn.a.text || "") + evt.text;
+          if (isThreadOnScreen()) {
+            var textEl = document.getElementById("stream-text");
+            if (textEl) textEl.textContent = turn.a.text;
+          }
+        } else if (evt.event === "done") {
+          var rawText = evt.answer_override || turn.a.text || "";
+          (evt.tool_calls || []).forEach(function (call) {
+            var r = call.result;
+            var items = Array.isArray(r) ? r : (r && typeof r === "object" ? [r] : []);
+            items.forEach(function (item) {
+              if (item && item.id && item.access && item.access !== "source") logAccessLedger(company, p, item.id, item.title || item.id, item.access, "Ask Cognex");
+            });
+          });
+          turn.a = { text: renderRichText(rawText), raw: rawText, sources: sourcesFromToolCalls(evt.tool_calls), files: evt.files || [], live: true };
+          finishTurn();
+        } else if (evt.event === "error") {
+          throw new Error(evt.detail || "stream error");
+        }
+      }).then(function () {
+        if (!sawAnyEvent) throw new Error("stream closed with no data"); // e.g. a proxy that buffers/strips SSE
       });
-      turn.a = { text: renderRichText(data.answer), raw: data.answer, sources: sourcesFromToolCalls(data.tool_calls), files: data.files || [], live: true };
-      turn.pending = false;
-      renderChatLog();
-      if (turn.a.files.length) openOutputPanel(turn);
     }).catch(function () {
-      // Real backend unreachable, or ANTHROPIC_API_KEY isn't configured yet on the
-      // server — fall back to the local rule-based engine so the demo still works
-      // end to end rather than breaking. Flagged in the UI, not silently swapped.
-      turn.a = answer(company, p, q);
-      turn.a.offline = true;
-      searchDecisions(company, q).forEach(function (d) {
-        var mode = decisionView(p, d);
-        if (mode !== "source") logAccessLedger(company, p, d.id, d.title, mode, "Ask Cognex (offline)");
-      });
-      turn.pending = false;
-      renderChatLog();
+      // Real backend/streaming unreachable, ANTHROPIC_API_KEY isn't set yet,
+      // or the stream errored out server-side — fall back to the local
+      // rule-based engine so the demo still works end to end. Flagged in
+      // the UI, not silently swapped. If a partial answer had already
+      // started streaming in, drop it rather than mixing a half-real,
+      // half-offline answer together.
+      if (!turn.pending) return; // "done" already landed via SSE before some later error — nothing to fall back on
+      fallbackToOffline();
     });
   }
 

@@ -34,7 +34,7 @@ from typing import Optional
 
 from anthropic import Anthropic
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
@@ -240,7 +240,34 @@ def _make_tool_impls(persona: Persona, decisions: list, goals: list):
                     score += 4 if len(tw) >= 2 else 2
             for w in _tokenize(d.title):
                 if len(w) > 3 and w in q_words:
-                    score += 1
+                    score += 2
+            # Also search the actual saved content (why/alternatives/
+            # assumptions/risks/result/derived), not just tags and title.
+            # Added 2026-08-29: a decision saved from an Ask Cognex chat gets
+            # its tags/title auto-generated from the QUESTION that triggered
+            # the save (see saveChatTurnToMemory in the frontend), which very
+            # often shares no words at all with a later, differently-phrased
+            # question — even though the real answer is sitting right there
+            # in the saved body text. Without this, a decision's actual
+            # content was effectively invisible to search the moment its
+            # title/tags didn't happen to overlap with a later query.
+            # Weighted lower than a tag/title hit (a body-text match is a
+            # weaker relevance signal) but this is what makes free-text
+            # saved content actually findable.
+            body_words = set()
+            for field in (d.why or []):
+                body_words |= _tokenize(field)
+            for field in (d.alternatives or []):
+                body_words |= _tokenize(field)
+            for field in (d.assumptions or []):
+                body_words |= _tokenize(field)
+            for field in (d.risks or []):
+                body_words |= _tokenize(field)
+            if d.result:
+                body_words |= _tokenize(d.result)
+            if d.derived:
+                body_words |= _tokenize(d.derived)
+            score += sum(1 for w in q_words if len(w) > 3 and w in body_words)
             if score > 0:
                 scored.append((score, d))
         scored.sort(key=lambda pair: -pair[0])
@@ -292,7 +319,51 @@ def _make_tool_impls(persona: Persona, decisions: list, goals: list):
     }
 
 
-def _system_prompt(persona: Persona) -> str:
+def _decisions_index(persona: Persona, decisions: list) -> str:
+    """A compact, always-present index of what's currently in this company's
+    Decision Memory — title plus a short preview — injected directly into
+    the system prompt on every turn, filtered to what this viewer is
+    allowed to see at all (source or derived; fully-restricted records are
+    left out entirely rather than teased).
+
+    Added 2026-08-29 in direct response to a real bug report: the founder
+    asked Cognex to research their own site and save it as company info in
+    one chat, then in a brand-new chat asked "how can we get new
+    customers" and got an answer that didn't know what the company sells.
+    Broadening search_decisions to full-text search (see above) helps, but
+    doesn't fully solve it — the model still has to decide to call the tool
+    and guess a query that happens to match. This index removes that
+    dependency for anything foundational: the assistant can see what
+    exists in memory on every turn without searching for it first, and
+    call get_decision(id) for the full record when something here is
+    actually relevant. This is what "the model should naturally have
+    context of everything saved" means in practice, without dumping every
+    full decision record into every system prompt."""
+    visible = []
+    for d in decisions:
+        mode = decision_view(persona.level, d)
+        if mode == "none":
+            continue
+        preview = ""
+        if mode == "source" and d.why:
+            preview = d.why[0]
+        elif mode == "derived" and d.derived:
+            preview = d.derived
+        preview = (preview[:160] + "…") if len(preview) > 160 else preview
+        visible.append((d, preview))
+    if not visible:
+        return "(Decision Memory is currently empty for this company.)"
+    visible.sort(key=lambda pair: pair[0].decided or "", reverse=True)
+    lines = []
+    for d, preview in visible[:40]:
+        line = f'- {d.id}: "{d.title}"'
+        if preview:
+            line += f" — {preview}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _system_prompt(persona: Persona, decisions: list) -> str:
     return f"""You are Cognex, the AI assistant {persona.name} ({persona.title}, {persona.dept}
 department, clearance level {persona.level} of 6) uses for day-to-day company work — research,
 writing, coding, documentation, analysis, debugging, brainstorming, and anything else they'd
@@ -331,6 +402,17 @@ only a derived summary is available, say so plainly instead of guessing at the f
 grounding requirement applies specifically to company-internal facts — it does not apply to
 general knowledge, web search results, coding help, or open research/computation, which you
 should answer using your own judgment and tools exactly as you normally would.
+
+Here is an index of everything currently in this company's Decision Memory that you're allowed
+to see at all (title plus a short preview) — this is a live index, not a static list, so treat it
+as current fact about what's been captured, including anything saved earlier in a completely
+different chat thread. Skim it before answering anything about the company itself — what it
+does, sells, or is planning — even if the question doesn't obviously sound like a "decision
+memory" question (e.g. "how do we get new customers" should make you check this index for
+anything about the product, market, or customers before answering from general reasoning alone).
+When something here looks relevant, call get_decision(id) to pull the full record rather than
+answering from the title/preview alone:
+{_decisions_index(persona, decisions)}
 
 When you do cite something retrieved from company memory, name what you retrieved so the person
 can see where it came from. When you cite something from a web search, name the source. When you
@@ -388,7 +470,7 @@ def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message:
 
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.messages.create(
-            model=MODEL, max_tokens=8192, system=_system_prompt(persona),
+            model=MODEL, max_tokens=8192, system=_system_prompt(persona, decisions),
             tools=all_tools, tool_choice={"type": "auto"}, messages=messages,
         )
         file_ids.extend(_extract_file_ids(response.content))
@@ -424,6 +506,102 @@ def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message:
 
     return {
         "answer": "I wasn't able to settle on an answer within the tool-call budget for this turn — try a narrower question.",
+        "tool_calls": tool_call_log,
+        "files": _resolve_files(client, file_ids),
+    }
+
+
+def _status_label_for(block_type: str, tool_name: str) -> str:
+    """A short, human status line for whatever tool just started — this is
+    what makes the UI show real, specific progress ("Searching the web…")
+    instead of a generic spinner while a turn is in flight. block_type
+    distinguishes an Anthropic server tool (web_search/web_fetch/
+    code_execution — the API executes these itself) from one of our own
+    company-memory tools (search_decisions, get_decision, ...)."""
+    if block_type == "server_tool_use":
+        return {
+            "web_search": "Searching the web…",
+            "web_fetch": "Reading a page…",
+            "code_execution": "Running code…",
+            "bash_code_execution": "Running code…",
+            "text_editor_code_execution": "Working with a file…",
+        }.get(tool_name, "Working…")
+    return {
+        "search_decisions": "Searching Decision Memory…",
+        "get_decision": "Pulling up a decision record…",
+        "search_goals": "Searching company goals…",
+        "get_goal_chain": "Tracing goal alignment…",
+        "get_my_context": "Checking your role and context…",
+    }.get(tool_name, "Thinking…")
+
+
+def run_agent_turn_stream(persona: Persona, decisions: list, goals: list, user_message: str, history=None):
+    """Same agentic tool-use loop as run_agent_turn, but a generator that
+    yields small dicts as things actually happen, instead of computing the
+    whole answer and handing it back in one lump: {"event": "status", ...}
+    the instant a tool call starts (so the UI can show real, specific
+    progress instead of a frozen spinner), {"event": "text", "text": ...}
+    for each text chunk AS Claude generates it (so the UI can type the
+    answer out, the way Claude's own apps do, instead of the text appearing
+    all at once when the whole response finally lands), and one final
+    {"event": "done", ...} carrying the same tool_calls/files metadata
+    run_agent_turn returns. The FastAPI route below turns these into
+    Server-Sent Events.
+
+    Added 2026-08-29 directly in response to the founder wanting Ask Cognex
+    to look and feel like using Claude itself, not just have the same
+    underlying capability — the non-streaming run_agent_turn() above is
+    left in place rather than replaced, since it's simpler for anything
+    that doesn't need incremental rendering (and is what test_offline.py
+    and any future non-streaming caller can keep using unchanged)."""
+    client = Anthropic()
+    impls = _make_tool_impls(persona, decisions, goals)
+    messages = list(history or [])
+    messages.append({"role": "user", "content": user_message})
+    tool_call_log = []
+    file_ids = []
+    all_tools = TOOL_SCHEMAS + SERVER_TOOLS
+
+    for _ in range(MAX_TOOL_ROUNDS):
+        with client.messages.stream(
+            model=MODEL, max_tokens=8192, system=_system_prompt(persona, decisions),
+            tools=all_tools, tool_choice={"type": "auto"}, messages=messages,
+        ) as stream:
+            for event in stream:
+                if event.type == "content_block_start":
+                    block = event.content_block
+                    block_type = getattr(block, "type", None)
+                    if block_type in ("tool_use", "server_tool_use"):
+                        yield {"event": "status", "label": _status_label_for(block_type, block.name)}
+                elif event.type == "text":
+                    yield {"event": "text", "text": event.text}
+            response = stream.get_final_message()
+
+        file_ids.extend(_extract_file_ids(response.content))
+
+        if response.stop_reason != "tool_use":
+            yield {"event": "done", "tool_calls": tool_call_log, "files": _resolve_files(client, file_ids)}
+            return
+
+        messages.append({"role": "assistant", "content": response.content})
+        tool_results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            if block.name not in impls:
+                continue
+            fn = impls[block.name]
+            result = fn(block.input)
+            tool_call_log.append({"name": block.name, "input": block.input, "result": result})
+            tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)})
+
+        if not tool_results:
+            continue
+        messages.append({"role": "user", "content": tool_results})
+
+    yield {
+        "event": "done",
+        "answer_override": "I wasn't able to settle on an answer within the tool-call budget for this turn — try a narrower question.",
         "tool_calls": tool_call_log,
         "files": _resolve_files(client, file_ids),
     }
@@ -539,6 +717,43 @@ def ask(req: AskRequest):
         return run_agent_turn(persona, decisions, goals, req.message, req.history)
     except Exception as e:
         _log_and_raise_502("ask", e)
+
+
+@router.post("/ask/stream")
+def ask_stream(req: AskRequest):
+    """Same request/response contract as POST /ask, but streamed as
+    Server-Sent Events instead of one blocking JSON response — added
+    2026-08-29 so Ask Cognex can type its answer out live and show real,
+    specific progress ("Searching the web…") while a tool is running,
+    instead of a frozen composer and then the whole answer appearing at
+    once. This is what the frontend actually calls now; POST /ask is kept
+    unchanged as the simpler non-streaming path (used by test_offline.py's
+    reference-backend tests, and available to any future caller that just
+    wants a plain JSON response).
+
+    A plain HTTPException can't be raised partway through an SSE response
+    (the 200 and the text/event-stream headers are already committed by the
+    time an error could happen), so failures are instead sent as a final
+    `{"event": "error", ...}` frame — see submitQuestionStreaming's error
+    handling in the frontend, which renders this exactly like the existing
+    offline-fallback path a non-streaming failure already produces."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    persona = Persona(**req.persona.model_dump())
+    decisions = [Decision(**d.model_dump()) for d in req.decisions]
+    goals = [Goal(**g.model_dump()) for g in req.goals]
+
+    def sse():
+        try:
+            for event in run_agent_turn_stream(persona, decisions, goals, req.message, req.history):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            import traceback
+            print(f"[ask/stream] Model call failed: {e!r}", flush=True)
+            traceback.print_exc()
+            yield f"data: {json.dumps({'event': 'error', 'detail': str(e)})}\n\n"
+
+    return StreamingResponse(sse(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 # ---------------------------------------------------------------------------

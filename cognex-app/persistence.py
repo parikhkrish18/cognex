@@ -5,9 +5,12 @@ and goals now live in Postgres (see models.py / db_postgres.py) instead of
 only in the browser tab.
 
 Deliberately NOT covered by this phase (still session/browser-only, exactly
-as before): Ask Cognex chat threads, Vantage gaps/plans, handoff records,
-and the access ledger. See the persistence build-log entry for why this
-slice first and what's next.
+as before): Vantage gaps/plans, handoff records, and the access ledger. See
+the persistence build-log entry for why this slice first and what's next.
+
+Ask Cognex chat threads (see the ChatThread endpoints near the bottom of
+this file) were added to real persistence on 2026-08-29, one phase later
+than the rest — see that day's build-log entry for why.
 
 Auth note, read together with server.py's existing one on the reference
 endpoints: login here still checks a shared demo password (`DEMO_PASSWORD`)
@@ -26,8 +29,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from datetime import datetime, timezone
+
 from db_postgres import get_session
-from models import Company, Decision, Goal, Persona
+from models import ChatThread, Company, Decision, Goal, Persona
 
 router = APIRouter(prefix="/api/v2")
 
@@ -364,3 +369,72 @@ def update_goal(company_id: str, goal_id: str, req: GoalUpdateIn):
             g.owner = req.owner
         db.commit()
         return _goal_json(g)
+
+
+# ---------------------------------------------------------------------------
+# Chat threads (Ask Cognex conversations) — added 2026-08-29, see ChatThread's
+# docstring in models.py for why this exists and why `turns` is one JSON blob
+# per thread rather than a normalized per-turn table.
+# ---------------------------------------------------------------------------
+def _thread_json(t: ChatThread) -> dict:
+    return {"id": t.id, "title": t.title, "turns": t.turns or [], "updatedAt": t.updated_at}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@router.get("/companies/{company_id}/personas/{persona_id}/threads")
+def list_threads(company_id: str, persona_id: str):
+    """Fetched once on login/session start so a persona's chat history is
+    there from the first render, instead of every session starting with an
+    empty sidebar the way it did before this endpoint existed."""
+    with get_session() as db:
+        rows = db.execute(
+            select(ChatThread)
+            .where(ChatThread.company_id == company_id, ChatThread.persona_id == persona_id)
+            .order_by(ChatThread.updated_at.desc())
+        ).scalars().all()
+        return {"threads": [_thread_json(t) for t in rows]}
+
+
+class ThreadUpsertIn(BaseModel):
+    id: Optional[str] = None
+    title: str = "New chat"
+    turns: list = []
+
+
+@router.put("/companies/{company_id}/personas/{persona_id}/threads/{thread_id}")
+def upsert_thread(company_id: str, persona_id: str, thread_id: str, req: ThreadUpsertIn):
+    """Upsert, not separate create/update — the frontend always knows the
+    thread id it's writing (it mints one client-side the moment a new chat
+    is started, same as it already does for decisions/goals), so one
+    idempotent call handles both "first turn in a brand-new thread" and
+    "another turn in an existing one" without the frontend having to track
+    which case it's in. Called fire-and-forget after every turn completes
+    and on rename/thread creation, mirroring persistNewDecision's pattern —
+    the browser-local state.chatByKey stays the source of truth for
+    rendering, this is a best-effort mirror so a reload has something real
+    to restore from."""
+    with get_session() as db:
+        _get_company_or_404(db, company_id)
+        t = db.get(ChatThread, (company_id, persona_id, thread_id))
+        if not t:
+            t = ChatThread(company_id=company_id, persona_id=persona_id, id=thread_id)
+            db.add(t)
+        t.title = req.title or "New chat"
+        t.turns = req.turns
+        t.updated_at = _now_iso()
+        db.commit()
+        return _thread_json(t)
+
+
+@router.delete("/companies/{company_id}/personas/{persona_id}/threads/{thread_id}")
+def delete_thread(company_id: str, persona_id: str, thread_id: str):
+    with get_session() as db:
+        t = db.get(ChatThread, (company_id, persona_id, thread_id))
+        if not t:
+            return {"ok": True}  # already gone — deleting twice isn't an error
+        db.delete(t)
+        db.commit()
+        return {"ok": True}

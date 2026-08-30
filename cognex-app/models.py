@@ -113,3 +113,39 @@ class Goal(Base):
     __table_args__ = (
         ForeignKeyConstraint(["company_id"], ["companies.id"]),
     )
+
+
+class ChatThread(Base):
+    """An Ask Cognex conversation. Added 2026-08-29 in direct response to a
+    founder bug report ("the multiple chats thing is not working, no saved
+    chats at all") and the immediate follow-up asking Cognex to "remember
+    all its memory" — until now, chat threads lived only in the browser
+    tab's `state.chatByKey` JS object (see the 2026-08-27 persistence
+    entry's explicit scope note: "Deliberately NOT covered by this phase...
+    Ask Cognex chat threads"), so every reload — and `index.html` is served
+    with Cache-Control: no-store on purpose (see that same day's entry) —
+    silently wiped every conversation.
+
+    `turns` stores the whole turn list as one JSON blob per thread rather
+    than a normalized per-turn table: nothing else in this app ever needs
+    to query into an individual turn (search/grounding already runs over
+    Decision Memory, not raw chat), and every other write in this
+    persistence layer already follows the same "send the whole current
+    object, upsert it" pattern (see persistNewDecision in the frontend) —
+    consistent, not a shortcut. Composite primary key is (company_id,
+    persona_id, id): a thread only belongs to one persona, and persona ids
+    are themselves only unique within a company (see Persona's own
+    docstring), so this mirrors that same nesting exactly."""
+
+    __tablename__ = "chat_threads"
+
+    company_id: Mapped[str] = mapped_column(String, primary_key=True)
+    persona_id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String, default="New chat")
+    turns: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[str] = mapped_column(String, default="")
+
+    __table_args__ = (
+        ForeignKeyConstraint(["company_id"], ["companies.id"]),
+    )
