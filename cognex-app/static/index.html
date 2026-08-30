@@ -120,19 +120,6 @@
   .feature-card h3 { font-size: 15.5px; margin-bottom: 8px; letter-spacing: -0.01em; }
   .feature-card p { font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; margin: 0; }
 
-  /* Benefits band */
-  .benefits-band { background: var(--bg-soft); }
-  .benefits-grid { display: grid; grid-template-columns: repeat(4, 1fr); max-width: 1080px; margin: 0 auto; border: 1px solid var(--border-soft); border-radius: 18px; overflow: hidden; background: var(--surface); }
-  @media (max-width: 860px) { .benefits-grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 560px) { .benefits-grid { grid-template-columns: 1fr; } }
-  .benefit-item { padding: 26px 22px; border-left: 1px solid var(--border-soft); }
-  .benefit-item:first-child { border-left: none; }
-  @media (max-width: 860px) { .benefit-item:nth-child(2n+1) { border-left: none; } .benefit-item:nth-child(n+3) { border-top: 1px solid var(--border-soft); } }
-  @media (max-width: 560px) { .benefit-item { border-left: none !important; } .benefit-item:not(:first-child) { border-top: 1px solid var(--border-soft); } }
-  .benefit-item .bi-icon { font-size: 18px; margin-bottom: 10px; }
-  .benefit-item h4 { font-size: 14px; margin-bottom: 6px; }
-  .benefit-item p { font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; margin: 0; }
-
   /* Founders */
   .founders-story { max-width: 700px; margin: 0 auto 44px; text-align: center; font-size: 15px; color: var(--ink-soft); line-height: 1.65; }
   .founders-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; max-width: 780px; margin: 0 auto; }
@@ -642,8 +629,7 @@
   <div class="wrap landing-topbar">
     <div class="landing-mark">Cognex</div>
     <nav class="landing-nav-links">
-      <a href="#features">Features</a>
-      <a href="#benefits">Benefits</a>
+      <a href="#features">What it does</a>
       <a href="#founders">Founders</a>
       <a href="#pricing">Pricing</a>
     </nav>
@@ -656,8 +642,8 @@
   <div class="landing-hero">
     <div class="wrap">
       <div class="landing-eyebrow">The memory layer for your company</div>
-      <h1>One memory. A different view for everyone who asks.</h1>
-      <p class="lede">Every company accumulates decisions, reasoning, and context that quietly disappears — into old chat threads, into someone's head, out the door when they leave. Cognex remembers what was decided and why, and gives each person exactly the context their role has earned.</p>
+      <h1>One memory. A different answer for everyone who asks.</h1>
+      <p class="lede">Cognex stores your company's decisions and goals in one place, then answers questions from them — showing each person only what their role has earned. For companies of roughly 20–500 people, past the point where everyone still remembers everything.</p>
       <div class="landing-hero-ctas">
         <button class="landing-cta-btn landing-demo-cta">Book a demo</button>
         <a href="#features" class="landing-hero-secondary">See how it works ↓</a>
@@ -693,86 +679,39 @@
   <div class="landing-section" id="features">
     <div class="wrap">
       <div class="landing-section-head">
-        <div class="landing-section-eyebrow">What Cognex does</div>
-        <h2>Everything a company knows, structured and permission-aware</h2>
-        <p>Not another search bar over your documents — a memory built around decisions, reasoning, and the org chart that governs who sees what.</p>
+        <div class="landing-section-eyebrow">What it does</div>
+        <h2>Six things, each solving one real problem</h2>
       </div>
       <div class="features-grid">
         <div class="feature-card">
           <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)">🗂</div>
           <h3>Decision Memory</h3>
-          <p>What was decided, why, what alternatives were weighed, and what happened next — a structured record, not a buried thread.</p>
+          <p>Someone asks why you picked the UAE for launch. Instead of a buried Slack thread, they get the actual reasoning — what was decided, why, and what was ruled out.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:var(--green-soft);color:var(--green)">🎯</div>
           <h3>Goal Alignment</h3>
-          <p>Company goal → department → team → individual work. “Why am I doing this?” always has a real, traceable answer.</p>
+          <p>An engineer's sprint ticket traces up to the company goal it serves — “expand APAC revenue 40%” — so “why am I doing this” always has a real answer.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:var(--purple-soft);color:var(--purple)">💬</div>
           <h3>Ask Cognex</h3>
-          <p>A capable AI assistant for research, writing, and code — grounded in your company's own memory, permission-filtered before anything reaches it.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:#fff1e0;color:#b45c09">✍️</div>
-          <h3>Complete the Story</h3>
-          <p>Cognex notices in-flight work and asks the questions that capture the reasoning before it disappears — proactive, not just searchable.</p>
+          <p>A chat assistant that reads your company's own Decision Memory and goals before it answers — and checks permissions before anything reaches it.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)">🔐</div>
           <h3>Hierarchical access</h3>
-          <p>One memory, a different view for everyone. Below your clearance, you get the derived outcome — never the raw source.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:var(--green-soft);color:var(--green)">🌳</div>
-          <h3>Company Tree</h3>
-          <p>Chain of command and clearance, visible to everyone — without exposing a single confidential decision.</p>
+          <p>The CEO sees the acquisition numbers. Everyone else sees “we're expanding into a new market.” Same question, one memory, the right-sized answer.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#fff1e0;color:#b45c09">🔁</div>
           <h3>Handoff Capture</h3>
-          <p>When someone leaves, their responsibilities, context, and open risks get captured and routed — not lost with them.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:var(--purple-soft);color:var(--purple)">📋</div>
-          <h3>Access Ledger</h3>
-          <p>Every derived or restricted view is logged — who saw what, when, and how. Built for teams that need to prove it.</p>
+          <p>Someone resigns Friday. By Monday, their open decisions and context are captured and routed to whoever's next — not lost with them.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:var(--green-soft);color:var(--green)">🔗</div>
           <h3>Slack-native capture</h3>
-          <p>Connect Slack and Cognex proposes decisions straight from real conversations — reviewed by a human before anything is saved.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="landing-section benefits-band" id="benefits">
-    <div class="wrap">
-      <div class="landing-section-head">
-        <div class="landing-section-eyebrow">Why teams switch</div>
-        <h2>Built for what actually breaks as a company grows</h2>
-      </div>
-      <div class="benefits-grid">
-        <div class="benefit-item">
-          <div class="bi-icon">🧠</div>
-          <h4>Nothing walks out the door</h4>
-          <p>Institutional knowledge survives turnover — the reasoning behind old decisions stays queryable years later.</p>
-        </div>
-        <div class="benefit-item">
-          <div class="bi-icon">🎚️</div>
-          <h4>Right context, every time</h4>
-          <p>Every person gets exactly what their role has earned — never more, never less, without a human gatekeeping every query.</p>
-        </div>
-        <div class="benefit-item">
-          <div class="bi-icon">🧩</div>
-          <h4>One AI, not five</h4>
-          <p>Company work stays inside Cognex instead of scattered across everyone's personal ChatGPT or Claude accounts.</p>
-        </div>
-        <div class="benefit-item">
-          <div class="bi-icon">📈</div>
-          <h4>Decisions that improve</h4>
-          <p>Scheduled reviews and logged outcomes mean past calls actually get revisited, not forgotten the moment they're made.</p>
+          <p>Paste a decision straight from a Slack thread. Cognex proposes the structured record; a human approves it before it's saved.</p>
         </div>
       </div>
     </div>
@@ -784,19 +723,19 @@
         <div class="landing-section-eyebrow">Who's building this</div>
         <h2>Two childhood friends from Antwerp</h2>
       </div>
-      <p class="founders-story">Shaan and Krish grew up together in Antwerp — the kind of friendship that outlasts ending up in different classrooms, and later, different countries. Somewhere between Shaan's finance lectures at LSE and Krish's engineering coursework at Queen Mary, the same conversation kept coming back: every company they looked at closely was quietly forgetting things — the reasoning behind old calls, the context new hires never got, the knowledge that walked out the door with whoever knew it best. Cognex is what happened when two people who've always liked building things decided that problem was worth actually fixing.</p>
+      <p class="founders-story">Shaan and Krish grew up together in Antwerp, now studying in different countries — Shaan finance at LSE, Krish engineering at Queen Mary. The same observation kept coming up: every company they looked at was quietly losing the reasoning behind its own decisions. Cognex is them fixing it.</p>
       <div class="founders-grid">
         <div class="founder-card">
           <div class="founder-avatar" style="background:#e8f0fe;color:#0071e3">SD</div>
           <h3>Shaan Diwan</h3>
           <div class="founder-role">Co-founder &amp; CEO</div>
-          <p class="bio">Pursuing a Master's in Finance at the London School of Economics. Leads strategy, go-to-market, and the business side of Cognex — bringing the same instinct for structure and reasoning he applies to markets to how companies should remember their own decisions.</p>
+          <p class="bio">Master's in Finance, London School of Economics. Leads strategy and go-to-market.</p>
         </div>
         <div class="founder-card">
           <div class="founder-avatar" style="background:#f5e9fc;color:#7a2fb0">KP</div>
           <h3>Krish Parikh</h3>
           <div class="founder-role">Co-founder &amp; CTO</div>
-          <p class="bio">Studying at Queen Mary University of London. Builds and ships Cognex end to end — from the permission model to the AI underneath it — with a bias toward building real things fast rather than just talking about them.</p>
+          <p class="bio">Studying at Queen Mary University of London. Builds and ships Cognex end to end.</p>
         </div>
       </div>
     </div>
@@ -807,7 +746,7 @@
       <div class="landing-section-head">
         <div class="landing-section-eyebrow">Pricing</div>
         <h2>Plans that grow with your team</h2>
-        <p>Every plan includes Decision Memory, Goal Alignment, and Ask Cognex. Book a demo for a walkthrough and to confirm what's right for your team.</p>
+        <p>Every plan includes Decision Memory, Goal Alignment, and Ask Cognex.</p>
       </div>
       <div class="pricing-grid">
         <div class="pricing-card">
@@ -872,8 +811,7 @@
         <p>Built by Shaan Diwan and Krish Parikh. The memory layer for your company.</p>
       </div>
       <div class="landing-footer-links">
-        <a href="#features">Features</a>
-        <a href="#benefits">Benefits</a>
+        <a href="#features">What it does</a>
         <a href="#founders">Founders</a>
         <a href="#pricing">Pricing</a>
       </div>
@@ -1450,6 +1388,68 @@
   function sessionKey() {
     if (!session.companyId || !session.personaId) return "";
     return session.companyId + "::" + session.personaId;
+  }
+
+  /* ============ Persistent login ============
+     Keeps a returning visitor signed in across page loads. Only ever stores
+     which company/persona (or "platform" for Cognex staff) was signed in —
+     never a password, never any decision/goal content — and every restore
+     re-checks that reference against the real backend before trusting it,
+     so a persona or company removed since the last visit falls back to the
+     sign-in screen instead of showing broken state. A staff member
+     previewing a company in support mode (viaSupport) is intentionally
+     never persisted — that's a temporary lens on someone else's account,
+     not a login of its own. */
+  var SESSION_STORAGE_KEY = "cognex_session_v1";
+
+  function persistSession() {
+    try {
+      if (session.type === "platform") {
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ type: "platform" }));
+      } else if (session.type === "company" && !session.viaSupport) {
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+          type: "company", companyId: session.companyId, personaId: session.personaId,
+        }));
+      }
+    } catch (e) { /* localStorage unavailable (private browsing, etc.) — just don't persist */ }
+  }
+
+  function clearPersistedSession() {
+    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
+  }
+
+  function restoreSession(done) {
+    var raw;
+    try { raw = localStorage.getItem(SESSION_STORAGE_KEY); } catch (e) { raw = null; }
+    if (!raw) { done(); return; }
+    var stored;
+    try { stored = JSON.parse(raw); } catch (e) { clearPersistedSession(); done(); return; }
+
+    if (stored.type === "platform") {
+      session = { type: "platform" };
+      done();
+      return;
+    }
+    if (stored.type === "company" && stored.companyId && stored.personaId) {
+      fetch("/api/v2/companies/" + encodeURIComponent(stored.companyId))
+        .then(function (res) { if (!res.ok) throw new Error("stale company"); return res.json(); })
+        .then(function (company) {
+          if (!company.personas || !company.personas[stored.personaId]) throw new Error("stale persona");
+          COMPANIES[stored.companyId] = serverCompanyToLocal(company);
+          session = { type: "company", companyId: stored.companyId, personaId: stored.personaId };
+          done();
+        })
+        .catch(function () {
+          // Company/persona no longer exists (or the backend is briefly
+          // unreachable) — clear the stale reference and fall back to the
+          // landing/sign-in screen rather than showing broken state.
+          clearPersistedSession();
+          done();
+        });
+      return;
+    }
+    clearPersistedSession();
+    done();
   }
 
   function genericStoryFor(persona) {
@@ -2282,12 +2282,13 @@
       function loginLocally() {
         if (email.trim().toLowerCase() === STAFF_EMAIL) {
           if (password !== STAFF_PASSWORD) { ui.loginError = "Incorrect password for Cognex staff."; renderShell(); return; }
-          ui.loginError = ""; session = { type: "platform" }; renderShell(); return;
+          ui.loginError = ""; session = { type: "platform" }; persistSession(); renderShell(); return;
         }
         var found = findAccountByEmail(email);
         if (!found || password !== DEMO_PASSWORD) { ui.loginError = "No matching account, or the password's wrong. Demo password is " + DEMO_PASSWORD + " for every account."; renderShell(); return; }
         ui.loginError = "";
         session = { type: "company", companyId: found.company.id, personaId: found.persona.id };
+        persistSession();
         renderShell();
       }
 
@@ -2311,9 +2312,10 @@
         return res.json();
       }).then(function (result) {
         ui.loginError = "";
-        if (result.type === "platform") { session = { type: "platform" }; renderShell(); return; }
+        if (result.type === "platform") { session = { type: "platform" }; persistSession(); renderShell(); return; }
         COMPANIES[result.companyId] = serverCompanyToLocal(result.company);
         session = { type: "company", companyId: result.companyId, personaId: result.personaId };
+        persistSession();
         renderShell();
       }).catch(function (err) {
         if (err && err.authoritative) { ui.loginError = err.message; renderShell(); return; }
@@ -2325,6 +2327,7 @@
       btn.addEventListener("click", function () {
         ui.loginError = "";
         session = { type: "company", companyId: "cognex-labs", personaId: btn.getAttribute("data-quick") };
+        persistSession();
         renderShell();
       });
     });
@@ -2373,7 +2376,7 @@
       function signInLocally() {
         if (password !== STAFF_PASSWORD) { ui.staffLoginError = "Incorrect password."; renderStaffLoginModal(); return; }
         closeStaffLoginModal();
-        ui.loginError = ""; session = { type: "platform" }; renderShell();
+        ui.loginError = ""; session = { type: "platform" }; persistSession(); renderShell();
       }
 
       // Same graceful-degradation pattern as the main login form: try the
@@ -2389,7 +2392,7 @@
         return res.json();
       }).then(function (result) {
         closeStaffLoginModal();
-        ui.loginError = ""; session = { type: "platform" }; renderShell();
+        ui.loginError = ""; session = { type: "platform" }; persistSession(); renderShell();
       }).catch(function (err) {
         if (err && err.authoritative) { ui.staffLoginError = "Incorrect password."; renderStaffLoginModal(); return; }
         signInLocally();
@@ -2580,7 +2583,7 @@
       });
     });
 
-    document.getElementById("platform-logout").onclick = function () { session = { type: null }; ui.showLogin = false; renderShell(); };
+    document.getElementById("platform-logout").onclick = function () { session = { type: null }; ui.showLogin = false; clearPersistedSession(); renderShell(); };
   }
 
   /* =====================================================================
@@ -4234,7 +4237,7 @@
   document.getElementById("ask-input").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { submitQuestion(this.value); this.value = ""; }
   });
-  document.getElementById("app-logout").addEventListener("click", function () { session = { type: null }; ui.showLogin = false; renderShell(); });
+  document.getElementById("app-logout").addEventListener("click", function () { session = { type: null }; ui.showLogin = false; clearPersistedSession(); renderShell(); });
   document.getElementById("exit-support").addEventListener("click", function () { session = { type: "platform" }; renderShell(); });
   document.querySelectorAll(".landing-signin-cta").forEach(function (btn) {
     btn.addEventListener("click", function () { ui.showLogin = true; renderShell(); });
@@ -4254,6 +4257,6 @@
   });
 
   renderProof();
-  renderShell();
+  restoreSession(function () { renderShell(); });
 })();
 </script>
