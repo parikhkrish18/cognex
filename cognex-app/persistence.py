@@ -314,6 +314,18 @@ def add_decision(company_id: str, req: DecisionIn):
 
 class DecisionUpdateIn(BaseModel):
     result: Optional[str] = None
+    # Added 2026-08-30 for the Brain Board's consolidation flow: merging new
+    # information into an existing node needs to update its title/summary/
+    # tags/why/decided-date in place, not just log a review outcome into
+    # `result` (the only field this endpoint supported before). Each is
+    # optional and only applied when actually provided, so every other
+    # existing caller of this endpoint (logReviewOutcome, still only ever
+    # sending `result`) keeps working unchanged.
+    title: Optional[str] = None
+    derived: Optional[str] = None
+    tags: Optional[list] = None
+    why: Optional[list] = None
+    decided: Optional[str] = None
 
 
 @router.put("/companies/{company_id}/decisions/{decision_id}")
@@ -324,8 +336,34 @@ def update_decision(company_id: str, decision_id: str, req: DecisionUpdateIn):
             raise HTTPException(status_code=404, detail="No such decision.")
         if req.result is not None:
             d.result = req.result
+        if req.title is not None:
+            d.title = req.title
+        if req.derived is not None:
+            d.derived = req.derived
+        if req.tags is not None:
+            d.tags = req.tags
+        if req.why is not None:
+            d.why = req.why
+        if req.decided is not None:
+            d.decided = req.decided
         db.commit()
         return _decision_json(d)
+
+
+@router.delete("/companies/{company_id}/decisions/{decision_id}")
+def delete_decision(company_id: str, decision_id: str):
+    # Added 2026-08-30 for the Brain Board: deleting a whole node off the
+    # board (the founder's explicit scope choice — whole entries only, not
+    # individual facts within one). No delete endpoint for a decision
+    # existed before this; every other object in this file already has one
+    # to mirror.
+    with get_session() as db:
+        d = db.get(Decision, (company_id, decision_id))
+        if not d:
+            raise HTTPException(status_code=404, detail="No such decision.")
+        db.delete(d)
+        db.commit()
+        return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

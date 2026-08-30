@@ -1017,6 +1017,153 @@ def complete_story_questions(req: StoryQuestionsRequest):
         _log_and_raise_502("complete-story/questions", e)
 
 
+# ---------------------------------------------------------------------------
+# Memory consolidation — the Brain Board, added 2026-08-30. The founder's
+# explicit call (asked directly rather than guessed): Decision Memory should
+# stop growing one record per save and instead read as a small, evolving set
+# of topic nodes around a central "company brain" — a real collective
+# summary, not a chat transcript. Every save path (Ask Cognex's "Save to
+# Decision Memory", Complete the Story, the Slack candidate-confirm flow,
+# Vantage's "mark plan done") now calls this endpoint FIRST: given the
+# board's existing nodes (lightweight: id/title/tags/current summary — full
+# why/alternatives/risks content is deliberately NOT sent, to keep this call
+# fast and cheap) and the new content just captured, Claude decides whether
+# it's really the same topic as an existing node (merge, rewriting that
+# node's summary to reflect everything now known together) or genuinely new
+# (a new node). This is a real judgment call, not a keyword-overlap
+# heuristic — "we sell design services to startups" and "we're a boutique
+# design and engineering studio" are the same topic despite sharing almost
+# no words, and a keyword match would have missed that (see the 2026-08-29
+# memory-grounding entry, the same class of gap on the search side of this
+# feature).
+CONSOLIDATE_MEMORY_SCHEMA = {
+    "name": "submit_memory_consolidation",
+    "description": (
+        "Decide whether newly captured information belongs on an existing Decision Memory node "
+        "(the same topic) or needs a new node, and produce the resulting title/summary/tags."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["merge", "new_node"],
+                "description": (
+                    "'merge' if the new information is really about the same topic as one of the "
+                    "existing nodes listed — prefer this whenever there's real topical overlap, since "
+                    "the whole point is fewer, richer nodes rather than one per save. 'new_node' only "
+                    "when it genuinely doesn't fit any existing node's topic."
+                ),
+            },
+            "merge_into_id": {
+                "type": "string",
+                "description": "The exact id of the existing node to merge into, copied from the candidate list. Required when action is 'merge'; empty string otherwise.",
+            },
+            "title": {
+                "type": "string",
+                "description": "A short, clear topic title (e.g. 'What we sell', 'Pricing strategy', 'Q4 product launch'). For a merge, refine the existing title only if the new content genuinely broadens the topic; otherwise keep it close to what's already there.",
+            },
+            "summary": {
+                "type": "string",
+                "description": (
+                    "One coherent paragraph describing everything currently known about this topic, "
+                    "written fresh to incorporate the new information — not the old summary with the "
+                    "new fact bolted on, and not just the new fact alone. This is what someone sees "
+                    "at a glance on the board."
+                ),
+            },
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "3-8 short lowercase topic tags for this node (merged with, not replacing, any relevant existing tags for a merge).",
+            },
+        },
+        "required": ["action", "merge_into_id", "title", "summary", "tags"],
+    },
+}
+
+
+def consolidate_memory(candidates: list, new_content: dict) -> dict:
+    client = Anthropic()
+    if candidates:
+        cand_lines = [
+            f'- id="{c.get("id","")}" | title="{c.get("title","")}" | tags={c.get("tags", [])} | current summary: {c.get("derived","") or "(none yet)"}'
+            for c in candidates
+        ]
+        candidates_block = "\n".join(cand_lines)
+    else:
+        candidates_block = "(the board is empty — this will be the first node)"
+
+    context = (
+        f"Existing Decision Memory nodes (the company's current brain):\n{candidates_block}\n\n"
+        "New information just captured:\n"
+        f"Source: {new_content.get('source_kind', '')} (by {new_content.get('source_persona', '')} on {new_content.get('date', '')})\n"
+        f"Title/prompt: {new_content.get('title', '')}\n"
+        f"Content: {new_content.get('body', '')}\n"
+    )
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=768,
+        system=(
+            "You maintain a company's collective knowledge board -- a small set of topic nodes, not a "
+            "growing pile of one-off notes. Decide whether the new information given is really about "
+            "the SAME topic as one of the existing nodes listed (merge into it, rewriting its summary "
+            "to reflect everything now known about that topic together) or is genuinely a new topic "
+            "(create a new node). Prefer merging when there's real topical overlap, even if the wording "
+            "is completely different -- judge by what the information is actually about, not shared "
+            "keywords. Only create a new node when the new information doesn't fit any existing node's "
+            "topic at all. The summary you write must read as one coherent paragraph describing the "
+            "current state of knowledge on this topic, not the newest fact bolted onto old text."
+        ),
+        tools=[CONSOLIDATE_MEMORY_SCHEMA],
+        tool_choice={"type": "tool", "name": "submit_memory_consolidation"},
+        messages=[{"role": "user", "content": context}],
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_memory_consolidation":
+            result = dict(block.input)
+            # Defense-in-depth against a hallucinated id: never let a
+            # "merge" into an id that isn't actually one of the candidates
+            # given silently corrupt a different node or 404 downstream --
+            # downgrade to a new node instead, which is always safe.
+            candidate_ids = {c.get("id") for c in candidates}
+            if result.get("action") == "merge" and result.get("merge_into_id") not in candidate_ids:
+                result["action"] = "new_node"
+                result["merge_into_id"] = ""
+            return result
+    raise RuntimeError("Claude did not return the expected submit_memory_consolidation tool call.")
+
+
+class MemoryCandidateIn(BaseModel):
+    id: str
+    title: str
+    tags: list[str] = []
+    derived: str = ""
+
+
+class NewMemoryContentIn(BaseModel):
+    title: str = ""
+    body: str = ""
+    source_kind: str = ""
+    source_persona: str = ""
+    date: str = ""
+
+
+class ConsolidateMemoryRequest(BaseModel):
+    candidates: list[MemoryCandidateIn] = []
+    new_content: NewMemoryContentIn
+
+
+@router.post("/memory/consolidate")
+def memory_consolidate(req: ConsolidateMemoryRequest):
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    try:
+        return consolidate_memory([c.model_dump() for c in req.candidates], req.new_content.model_dump())
+    except Exception as e:
+        _log_and_raise_502("memory/consolidate", e)
+
+
 class StoryExtractRequest(BaseModel):
     work_item: str
     qa_pairs: list[dict] = []

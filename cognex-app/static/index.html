@@ -381,6 +381,25 @@
   .msg-cognex .body .md-h3 { font-size: 15.5px; }
   .msg-cognex .body .md-h4 { font-size: 14.5px; }
   .msg-cognex .body .md-h5 { font-size: 13.5px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .02em; }
+  .msg-cognex .body .md-hr { border: none; border-top: 1px solid var(--border-soft); margin: 16px 0; }
+  /* Thinking / narration -- the "I'll search... let me check..." text Claude
+     emits before a tool call, kept visually distinct from the actual final
+     answer rather than run together with it (they used to be concatenated
+     into one string with no separator at all). Muted, italic, and smaller
+     than the real answer so it unmistakably reads as "in-progress notes,"
+     not part of the answer itself. */
+  .stream-thinking { margin-bottom: 8px; }
+  .stream-thinking-item { font-size: 13px; font-style: italic; color: var(--ink-faint); line-height: 1.5; padding: 2px 0 2px 16px; position: relative; }
+  .stream-thinking-item::before { content: "›"; position: absolute; left: 2px; color: var(--ink-faint); }
+  .msg-thinking { margin-bottom: 12px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-2); }
+  .msg-thinking summary { list-style: none; cursor: pointer; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--ink-faint); display: flex; align-items: center; gap: 6px; }
+  .msg-thinking summary::-webkit-details-marker { display: none; }
+  .msg-thinking summary::before { content: "🧠"; font-size: 12px; }
+  .msg-thinking summary::after { content: "Show"; margin-left: auto; font-weight: 500; color: var(--accent-ink); }
+  .msg-thinking[open] summary::after { content: "Hide"; }
+  .msg-thinking-body { padding: 0 12px 10px; }
+  .msg-thinking-item { font-size: 13px; font-style: italic; color: var(--ink-soft); line-height: 1.5; padding: 3px 0; }
+  .msg-thinking-item:not(:last-child) { border-bottom: 1px dashed var(--border-soft); }
   .code-block { margin: 4px 0 12px; border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; background: #1d1d1f; }
   .code-block:last-child { margin-bottom: 0; }
   .code-block-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #2c2c2e; }
@@ -534,6 +553,46 @@
   .review-banner { display: flex; gap: 10px; align-items: flex-start; background: #fff1e0; color: #b45c09; border-radius: 14px; padding: 14px 16px; margin-bottom: 16px; font-size: 13px; }
   .review-banner ul { margin: 6px 0 0; padding-left: 18px; }
   .review-banner li { margin-bottom: 4px; }
+
+  /* ============ Company Brain — Decision Memory board, replaces the card
+     grid entirely (2026-08-30, per the founder's own call: not a growing
+     list of one-per-save cards, a small evolving set of topic nodes around
+     a central "brain"). Radial layout in plain percentage coordinates (an
+     SVG with viewBox="0 0 100 100") rather than a pixel-measuring JS layout
+     library or a physics simulation -- keeps this dependency-free like the
+     rest of the app, and is naturally responsive since percentages scale
+     with the container automatically. ============ */
+  .board-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+  .board-title { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+  .board-sub { font-size: 13px; color: var(--ink-faint); margin-top: 3px; max-width: 52ch; }
+  .board-search { border: 1px solid var(--border); border-radius: 999px; padding: 8px 16px; font-size: 13px; font-family: inherit; width: 220px; flex: none; background: var(--surface); }
+  .board-search::placeholder { color: var(--ink-faint); }
+  .brain-board { position: relative; width: 100%; max-width: 720px; aspect-ratio: 1; margin: 12px auto 4px; }
+  .board-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .board-lines line { stroke: var(--border-soft); stroke-width: 0.35; transition: stroke .15s ease, stroke-width .15s ease; }
+  .board-lines line.hot { stroke: var(--accent-ink); stroke-width: 0.6; }
+  .brain-core { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 92px; height: 92px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, var(--accent-soft), var(--surface-2)); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 0 0 7px var(--surface), 0 6px 20px rgba(0,0,0,0.08); font-size: 30px; z-index: 2; animation: brainPulse 3.6s ease-in-out infinite; }
+  .brain-core .board-count { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); margin-top: 3px; letter-spacing: .01em; }
+  @keyframes brainPulse { 0%, 100% { box-shadow: 0 0 0 7px var(--surface), 0 6px 20px rgba(0,0,0,0.08); } 50% { box-shadow: 0 0 0 10px var(--surface), 0 8px 28px rgba(0,113,227,0.16); } }
+  .board-node { position: absolute; transform: translate(-50%, -50%); width: 116px; text-align: center; cursor: pointer; z-index: 1; transition: transform .15s ease, opacity .15s ease; }
+  .board-node:hover, .board-node:focus-visible { transform: translate(-50%, -50%) scale(1.07); z-index: 3; }
+  .board-node.dimmed { opacity: 0.22; }
+  .board-node-bubble { width: 62px; height: 62px; margin: 0 auto 6px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border-soft); display: flex; align-items: center; justify-content: center; font-size: 21px; position: relative; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  .board-node.locked .board-node-bubble { border-color: var(--red); opacity: 0.6; }
+  .board-node.derived .board-node-bubble { border-color: var(--accent-ink); }
+  .board-node.needs-review .board-node-bubble::after { content: ""; position: absolute; top: -2px; right: -2px; width: 12px; height: 12px; border-radius: 50%; background: #ff9500; border: 2px solid var(--surface); }
+  .board-node-title { font-size: 11.5px; font-weight: 600; color: var(--ink); line-height: 1.25; }
+  .board-node-del { position: absolute; top: -3px; right: 18px; width: 19px; height: 19px; border-radius: 50%; border: none; background: var(--surface); color: var(--ink-faint); font-size: 11px; line-height: 1; box-shadow: 0 1px 5px rgba(0,0,0,0.18); opacity: 0; cursor: pointer; }
+  .board-node:hover .board-node-del { opacity: 1; }
+  .board-node-del:hover { color: var(--red); }
+  .board-detail-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; }
+  .board-detail-head h3 { font-size: 18px; letter-spacing: -0.01em; margin-right: auto; }
+  .board-detail-close { flex: none; border: none; background: none; color: var(--ink-faint); cursor: pointer; font-size: 18px; padding: 2px 4px; line-height: 1; }
+  .board-detail-close:hover { color: var(--ink); }
+  .board-detail-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-faint); margin-bottom: 16px; }
+  .board-detail-body { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; margin-bottom: 8px; }
+  @media (max-width: 560px) { .board-detail-body { grid-template-columns: 1fr; } }
+  .board-detail-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
 
   /* ============ Leave-company modal / handoff ============ */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; padding: 24px; z-index: 60; }
@@ -950,7 +1009,15 @@
         <div class="content-wrap">
           <div class="panel panel-pad" id="tab-decisions" style="display:none">
             <div id="decisions-banner"></div>
-            <div class="decisions-grid" id="decisions-grid"></div>
+            <div class="board-toolbar">
+              <div>
+                <div class="board-title">Company Brain</div>
+                <div class="board-sub">Everything Cognex has learned, consolidated by topic — not a growing list of individual saves.</div>
+              </div>
+              <input type="search" id="board-search" class="board-search" placeholder="Filter topics…" />
+            </div>
+            <div class="brain-board" id="brain-board"></div>
+            <div class="modal-overlay" id="board-detail-overlay" style="display:none"></div>
           </div>
 
           <div class="panel panel-pad" id="tab-handoffs" style="display:none">
@@ -1299,6 +1366,62 @@
       viaStory: !!d.viaStory, viaSlack: !!d.viaSlack, viaChat: !!d.viaChat, viaVantage: !!d.viaVantage,
     }));
   }
+  /* ============ Memory consolidation — the Company Brain's actual "collective
+     summary" behavior, added 2026-08-30 per the founder's explicit call. Every
+     save path (Ask Cognex, Complete the Story, Slack confirm, Vantage
+     mark-done) now routes its new content through here FIRST instead of
+     always creating a new Decision Memory node: a real Claude call (see
+     live.py's consolidate_memory) decides whether this is really the same
+     topic as an existing node (merge, rewriting that node's summary to
+     reflect everything now known together) or genuinely new (a new node).
+     `draftDecision` is built exactly as before at each call site (same
+     shape, same id scheme) -- this only intercepts what happens to it: on
+     "merge" it's discarded and an EXISTING node is updated in place instead;
+     on "new_node" its title/derived/tags are refined by Claude before it's
+     created, same as before. If the backend/API is unreachable (no
+     ANTHROPIC_API_KEY yet, network issue), this falls back to the exact
+     pre-2026-08-30 behavior -- always create the new node as drafted --
+     the same graceful-degradation pattern already used everywhere else a
+     real Claude call exists in this app, so saving never just fails. */
+  function consolidateThenSave(company, draftDecision, sourceKind, bodyText, onDone) {
+    var candidates = company.decisions.map(function (d) {
+      return { id: d.id, title: d.title, tags: d.tags || [], derived: d.derived || "" };
+    });
+    function createAsDrafted() {
+      company.decisions.unshift(draftDecision);
+      persistNewDecision(company, draftDecision);
+      onDone(draftDecision, false);
+    }
+    fetch("/api/memory/consolidate", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        candidates: candidates,
+        new_content: { title: draftDecision.title, body: bodyText, source_kind: sourceKind, source_persona: draftDecision.owner || "", date: draftDecision.decided },
+      }),
+    }).then(function (res) {
+      if (!res.ok) throw new Error("consolidate unavailable (" + res.status + ")");
+      return res.json();
+    }).then(function (result) {
+      if (result.action === "merge" && result.merge_into_id) {
+        var existing = company.decisions.filter(function (x) { return x.id === result.merge_into_id; })[0];
+        if (!existing) { createAsDrafted(); return; } // candidate list came from company.decisions itself, so this shouldn't happen -- defend anyway rather than silently dropping the save
+        existing.title = result.title || existing.title;
+        existing.derived = result.summary || existing.derived;
+        existing.tags = (existing.tags || []).concat((result.tags || []).filter(function (t) { return (existing.tags || []).indexOf(t) === -1; }));
+        existing.decided = draftDecision.decided;
+        existing.why = (existing.why || []).concat(["[" + draftDecision.decided + " · " + (draftDecision.owner || "unknown") + " via " + sourceKind + "] " + bodyText]);
+        persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/decisions/" + encodeURIComponent(existing.id), {
+          title: existing.title, derived: existing.derived, tags: existing.tags, why: existing.why, decided: existing.decided,
+        }));
+        onDone(existing, true);
+      } else {
+        draftDecision.title = result.title || draftDecision.title;
+        draftDecision.derived = result.summary || draftDecision.derived;
+        if (result.tags && result.tags.length) draftDecision.tags = result.tags;
+        createAsDrafted();
+      }
+    }).catch(createAsDrafted);
+  }
 
   var COMPANIES = {};
   COMPANIES["cognex-labs"] = seedCognexLabs();
@@ -1313,7 +1436,7 @@
 
   /* ============ Session ============ */
   var session = { type: null }; // null | {type:'company', companyId, personaId, viaSupport} | {type:'platform'}
-  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, platformCompanies: null };
+  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, platformCompanies: null, boardOpenNodeId: null, boardQuery: "" };
 
   function currentCompany() {
     if (session.type === "company") return COMPANIES[session.companyId];
@@ -1662,10 +1785,11 @@
         derived: plan.title + " — a plan raised through Vantage was completed.",
         viaVantage: true,
       };
-      company.decisions.unshift(newDecision);
-      persistNewDecision(company, newDecision);
-      renderVantage();
-      renderDecisions();
+      var vantageBody = (plan.description || "") + (plan.resolution ? " Outcome: " + plan.resolution : "");
+      consolidateThenSave(company, newDecision, "Vantage", vantageBody, function () {
+        renderVantage();
+        renderDecisions();
+      });
       return;
     }
     plan.status = newStatus;
@@ -2586,37 +2710,90 @@
   }
   function renderRichText(raw) {
     if (!raw) return "";
+    // Line-by-line block scanner rather than "split on blank lines, then
+    // check if the whole block looks like one thing" (the original
+    // approach): a header only rendered when it sat alone in its own
+    // blank-line-separated paragraph, but real model output very often
+    // writes a header immediately followed by body text on the very next
+    // line with no blank line between them (which is completely valid
+    // Markdown -- ATX headers don't require surrounding blank lines) -- so
+    // "### Section" followed directly by "The risk: ..." fell through to
+    // the generic paragraph handler and rendered as a literal "###" instead
+    // of a heading. Scanning line-by-line means a header, a horizontal
+    // rule, or a list is recognized the instant its line is seen, whatever
+    // sits immediately before or after it.
     var codeBlocks = [];
     var withoutCode = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) {
       var idx = codeBlocks.length;
       codeBlocks.push({ lang: lang || "", code: code.replace(/\n$/, "") });
-      return "@@CODEBLOCK" + idx + "@@";
+      return "\n\n@@CODEBLOCK" + idx + "@@\n\n";
     });
-    return withoutCode.split(/\n{2,}/).map(function (block) {
-      block = block.trim();
-      if (!block) return "";
-      var codeMatch = block.match(/^@@CODEBLOCK(\d+)@@$/);
+    var lines = withoutCode.split("\n");
+    var out = [];
+    var para = [];
+    function flushPara() {
+      if (!para.length) return;
+      var text = para.join(" ").trim();
+      if (text) out.push("<p>" + inlineFormat(text) + "</p>");
+      para = [];
+    }
+    var i = 0;
+    while (i < lines.length) {
+      var trimmed = lines[i].trim();
+      if (!trimmed) { flushPara(); i++; continue; }
+
+      var codeMatch = trimmed.match(/^@@CODEBLOCK(\d+)@@$/);
       if (codeMatch) {
+        flushPara();
         var cb = codeBlocks[parseInt(codeMatch[1], 10)];
         var codeId = "code-" + Math.random().toString(36).slice(2, 9);
-        return '<div class="code-block"><div class="code-block-head"><span>' + esc(cb.lang || "code") + '</span>' +
+        out.push('<div class="code-block"><div class="code-block-head"><span>' + esc(cb.lang || "code") + '</span>' +
           '<button class="code-copy-btn" data-copy-target="' + codeId + '">Copy</button></div>' +
-          '<pre><code id="' + codeId + '">' + esc(cb.code) + '</code></pre></div>';
+          '<pre><code id="' + codeId + '">' + esc(cb.code) + '</code></pre></div>');
+        i++; continue;
       }
-      var lines = block.split("\n");
-      var headerMatch = lines.length === 1 && lines[0].match(/^(#{1,4})\s+(.*)$/);
+
+      var headerMatch = trimmed.match(/^(#{1,4})\s+(.*)$/);
       if (headerMatch) {
+        flushPara();
         var level = Math.min(headerMatch[1].length + 2, 5);
-        return '<div class="md-h' + level + '">' + inlineFormat(headerMatch[2]) + "</div>";
+        out.push('<div class="md-h' + level + '">' + inlineFormat(headerMatch[2]) + "</div>");
+        i++; continue;
       }
-      if (lines.every(function (l) { return /^[-*]\s+/.test(l.trim()); })) {
-        return '<ul class="md-list">' + lines.map(function (l) { return "<li>" + inlineFormat(l.trim().replace(/^[-*]\s+/, "")) + "</li>"; }).join("") + "</ul>";
+
+      if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(trimmed)) {
+        flushPara();
+        out.push('<hr class="md-hr">');
+        i++; continue;
       }
-      if (lines.every(function (l) { return /^\d+\.\s+/.test(l.trim()); })) {
-        return '<ol class="md-list">' + lines.map(function (l) { return "<li>" + inlineFormat(l.trim().replace(/^\d+\.\s+/, "")) + "</li>"; }).join("") + "</ol>";
+
+      if (/^[-*]\s+/.test(trimmed)) {
+        flushPara();
+        var items = [];
+        while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+          items.push("<li>" + inlineFormat(lines[i].trim().replace(/^[-*]\s+/, "")) + "</li>");
+          i++;
+        }
+        out.push('<ul class="md-list">' + items.join("") + "</ul>");
+        continue;
       }
-      return "<p>" + lines.map(inlineFormat).join("<br>") + "</p>";
-    }).join("");
+
+      if (/^\d+\.\s+/.test(trimmed)) {
+        flushPara();
+        var oitems = [];
+        while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+          oitems.push("<li>" + inlineFormat(lines[i].trim().replace(/^\d+\.\s+/, "")) + "</li>");
+          i++;
+        }
+        out.push('<ol class="md-list">' + oitems.join("") + "</ol>");
+        continue;
+      }
+
+      para.push(trimmed);
+      i++;
+    }
+    flushPara();
+    return out.join("");
   }
 
   function renderChatLog() {
@@ -2644,7 +2821,11 @@
         // means a full renderChatLog() (e.g. from switching threads and
         // back) picks up right where the accumulated turn state currently
         // is, instead of needing to reconcile two different id schemes.
+        var thinkingSoFar = (turn.thinking || []).map(function (t) {
+          return '<div class="stream-thinking-item">' + esc(t) + "</div>";
+        }).join("");
         block.innerHTML = '<div class="msg-cognex"><div class="who"><div class="avatar sm" style="background:var(--accent-soft);color:var(--accent-ink)">C</div><span class="name">Cognex</span></div>' +
+          '<div class="stream-thinking" id="stream-thinking">' + thinkingSoFar + '</div>' +
           '<div class="stream-status" id="stream-status">' + esc(turn.statusLabel || "Thinking…") + '</div>' +
           '<div class="body stream-body streaming-cursor" id="stream-text">' + esc(turn.a.text || "") + '</div></div>';
         log.appendChild(block);
@@ -2666,13 +2847,25 @@
       // brain instead of scattering useful context across throwaway chats.
       var saveHtml = turn.savedToMemory
         ? '<span class="msg-saved">✓ Saved to Decision Memory</span>'
+        : turn.savingToMemory
+        ? '<span class="msg-saved" style="color:var(--ink-faint)">Saving…</span>'
         : '<button class="msg-save-btn" data-save-turn="' + idx + '">+ Save to Decision Memory</button>';
       var outputHtml = (turn.a.files && turn.a.files.length)
         ? '<button class="msg-view-output-btn" data-view-output="' + idx + '">📎 View output (' + turn.a.files.length + ')</button>'
         : "";
       var actionsHtml = '<div class="msg-actions">' + saveHtml + outputHtml + "</div>";
+      // A collapsed-by-default "🧠 Thinking" panel for the narration Claude
+      // produced before its tool calls ("I'll search...", "Let me fetch...")
+      // -- kept, but clearly out of the way of the actual answer rather than
+      // glued onto the front of it with no separator at all.
+      var thinkingHtml = (turn.a.thinking && turn.a.thinking.length)
+        ? '<details class="msg-thinking"><summary>Thinking</summary><div class="msg-thinking-body">' +
+          turn.a.thinking.map(function (t) { return '<div class="msg-thinking-item">' + esc(t) + "</div>"; }).join("") +
+          "</div></details>"
+        : "";
       block.innerHTML = '<div class="msg-cognex"><div class="who"><div class="avatar sm" style="background:var(--accent-soft);color:var(--accent-ink)">C</div><span class="name">Cognex</span>' +
         modeBadge + "</div>" +
+        thinkingHtml +
         '<div class="body">' + turn.a.text + "</div>" + srcHtml + actionsHtml + "</div>";
       log.appendChild(block);
     });
@@ -2684,7 +2877,7 @@
   function saveChatTurnToMemory(turnIndex) {
     var company = currentCompany(), p = currentPersona();
     var turn = chatFor()[turnIndex];
-    if (!turn || turn.pending || !turn.a || turn.savedToMemory) return;
+    if (!turn || turn.pending || !turn.a || turn.savedToMemory || turn.savingToMemory) return;
     var dateStr = new Date().toISOString().slice(0, 10);
     storyCounter += 1;
     var bodyText = plainTextOf(turn);
@@ -2715,11 +2908,14 @@
       derived: turn.q + " — context captured directly from " + p.name + "'s conversation with Cognex.",
       viaChat: true,
     };
-    company.decisions.unshift(newDecision);
-    persistNewDecision(company, newDecision);
-    turn.savedToMemory = true;
+    turn.savingToMemory = true;
     renderChatLog();
-    renderDecisions();
+    consolidateThenSave(company, newDecision, "Ask Cognex", bodyText, function () {
+      turn.savingToMemory = false;
+      turn.savedToMemory = true;
+      renderChatLog();
+      renderDecisions();
+    });
   }
   function badgeForAccess(access) {
     if (access === "source") return '<span class="badge badge-source">Source</span>';
@@ -2793,7 +2989,7 @@
       history.push({ role: "user", content: t.q });
       history.push({ role: "assistant", content: t.a.raw });
     });
-    var turn = { q: q, a: { text: "", sources: [] }, pending: true, statusLabel: "Thinking…" };
+    var turn = { q: q, a: { text: "", sources: [] }, pending: true, statusLabel: "Thinking…", thinking: [] };
     chat.push(turn);
     if (thread.title === "New chat") thread.title = q.length > 42 ? q.slice(0, 42) + "…" : q;
     renderThreadList();
@@ -2846,6 +3042,32 @@
       return readSSE(res, function (evt) {
         sawAnyEvent = true;
         if (evt.event === "status") {
+          // Any text accumulated so far belongs to the round that's ending
+          // now that a new tool call is starting -- e.g. "I'll search our
+          // decision memory..." said right before the search_decisions call.
+          // That's narration about what Cognex is about to do, not part of
+          // the eventual answer, so it's moved into `turn.thinking` and the
+          // running text buffer is cleared for whatever round comes next.
+          // Without this split, every round's text (narration AND the real
+          // final answer) used to land in the same buffer back-to-back with
+          // no separator at all -- run-on sentences in the UI, and markdown
+          // blocks (like a header immediately followed by the next round's
+          // text) that no longer parsed correctly either.
+          if (turn.a.text) {
+            turn.thinking.push(turn.a.text);
+            turn.a.text = "";
+            if (isThreadOnScreen()) {
+              var thinkingEl = document.getElementById("stream-thinking");
+              if (thinkingEl) {
+                var item = document.createElement("div");
+                item.className = "stream-thinking-item";
+                item.textContent = turn.thinking[turn.thinking.length - 1];
+                thinkingEl.appendChild(item);
+              }
+              var textElClear = document.getElementById("stream-text");
+              if (textElClear) textElClear.textContent = "";
+            }
+          }
           turn.statusLabel = evt.label;
           if (isThreadOnScreen()) {
             var statusEl = document.getElementById("stream-status");
@@ -2866,7 +3088,7 @@
               if (item && item.id && item.access && item.access !== "source") logAccessLedger(company, p, item.id, item.title || item.id, item.access, "Ask Cognex");
             });
           });
-          turn.a = { text: renderRichText(rawText), raw: rawText, sources: sourcesFromToolCalls(evt.tool_calls), files: evt.files || [], live: true };
+          turn.a = { text: renderRichText(rawText), raw: rawText, thinking: turn.thinking.slice(), sources: sourcesFromToolCalls(evt.tool_calls), files: evt.files || [], live: true };
           finishTurn();
         } else if (evt.event === "error") {
           throw new Error(evt.detail || "stream error");
@@ -2900,10 +3122,63 @@
       return '<div class="dcard-sec"><h4>' + esc(s.label) + "</h4>" + body + "</div>";
     }).join("");
   }
+  /* ============ Company Brain board ============
+     Replaces the old one-card-per-decision grid entirely (2026-08-30, per
+     the founder's explicit call). A radial layout around a central "brain"
+     node, computed in plain percentage coordinates (no pixel measuring, no
+     physics/force-directed layout library) so it stays responsive and
+     dependency-free. Nodes ring outward as the board grows; clicking one
+     opens the exact same detail content the old cards showed (reusing
+     decisionSections/sourceBadgeFor/decisionView unchanged — clearance
+     filtering is completely untouched by this redesign, only how it's
+     browsed). "Slightly interactive" per the founder's ask: hover
+     highlights a node's connecting line, click opens full detail, a delete
+     button removes a whole node (the founder's chosen granularity — whole
+     entries only, not editing individual facts within one), and a search
+     box dims non-matching nodes rather than hiding the board's shape. */
+  function layoutBoardNodes(n) {
+    // Concentric rings, each holding more nodes than the last (they have
+    // more circumference to spread across); alternate each ring's starting
+    // angle by a half-step so nodes on adjacent rings don't line up in a
+    // single spoke, which reads as more organic and avoids overlapping
+    // connecting lines. Radii stay comfortably inside the 0-100 viewBox so
+    // nodes (which have real width) never clip the board's edge.
+    var ringCaps = [6, 10, 16, 22, 30];
+    var ringRadii = [17, 28, 37, 44, 47];
+    var positions = [];
+    var idx = 0, ring = 0;
+    while (idx < n) {
+      var cap = ringCaps[Math.min(ring, ringCaps.length - 1)];
+      var rad = ringRadii[Math.min(ring, ringRadii.length - 1)];
+      var count = Math.min(cap, n - idx);
+      var offset = (ring % 2) ? (Math.PI / count) : 0;
+      for (var j = 0; j < count; j++) {
+        var angle = (j / count) * Math.PI * 2 + offset - Math.PI / 2;
+        positions.push({ cx: 50 + rad * Math.cos(angle), cy: 50 + rad * Math.sin(angle) });
+        idx++;
+      }
+      ring++;
+    }
+    return positions;
+  }
+  function boardNodeIcon(d) {
+    if (d.viaStory) return "📝";
+    if (d.viaSlack) return "💬";
+    if (d.viaChat) return "🗨️";
+    if (d.viaVantage) return "🧭";
+    return "🗂";
+  }
+  function nodeMatchesBoardQuery(d, q) {
+    if (!q) return true;
+    var words = tokenize(q);
+    if (!words.length) return true;
+    var hay = tokenize([d.title, (d.tags || []).join(" "), d.derived || ""].join(" "));
+    return words.some(function (w) { return hay.indexOf(w) !== -1; });
+  }
   function renderDecisions() {
     var company = currentCompany(), p = currentPersona();
-    var grid = document.getElementById("decisions-grid");
     var bannerEl = document.getElementById("decisions-banner");
+    var board = document.getElementById("brain-board");
     var overdue = decisionsNeedingReview(company, p);
     if (overdue.length) {
       bannerEl.innerHTML = '<div class="review-banner"><span>⏰</span><div><div style="font-weight:600;margin-bottom:2px">' +
@@ -2913,28 +3188,104 @@
     } else {
       bannerEl.innerHTML = "";
     }
-    if (company.decisions.length === 0) { grid.innerHTML = '<div class="empty-decisions">No decisions recorded yet. Use Complete the Story to capture the first one.</div>'; return; }
-    grid.innerHTML = "";
-    company.decisions.forEach(function (d) {
+    var decisions = company.decisions;
+    var countLabel = decisions.length === 1 ? "1 topic" : decisions.length + " topics";
+    if (decisions.length === 0) {
+      board.innerHTML = '<div class="brain-core"><span>🧠</span><span class="board-count">0 topics</span></div>' +
+        '<div class="empty-decisions" style="position:absolute;top:64%;left:50%;transform:translateX(-50%);width:78%">Nothing captured yet. Ask Cognex something and save it, or use Complete the Story — new topics will appear here.</div>';
+      document.querySelectorAll("[data-log-review]").forEach(function (btn) {
+        btn.addEventListener("click", function () { logReviewOutcome(btn.getAttribute("data-log-review")); });
+      });
+      return;
+    }
+    var positions = layoutBoardNodes(decisions.length);
+    var linesHtml = decisions.map(function (d, i) {
+      var pos = positions[i];
+      return '<line data-line-for="' + esc(d.id) + '" x1="50" y1="50" x2="' + pos.cx + '" y2="' + pos.cy + '"></line>';
+    }).join("");
+    var nodesHtml = decisions.map(function (d, i) {
+      var pos = positions[i];
       var mode = decisionView(p, d);
-      var card = document.createElement("div");
-      card.className = "dcard" + (mode !== "source" ? " locked" : "");
-      var storyTag = d.viaStory ? '<span class="badge badge-story">Complete the Story</span>' : "";
-      var slackTag = d.viaSlack ? '<span class="badge badge-slack">Slack</span>' : "";
-      var chatTag = d.viaChat ? '<span class="badge badge-chat">Ask Cognex</span>' : "";
-      var reviewTag = (mode === "source" && decisionNeedsReview(d)) ? ' <span class="badge badge-review">Needs review</span>' : "";
-      var head = '<div class="dcard-head"><h3>' + esc(d.title) + "</h3>" + storyTag + slackTag + chatTag + sourceBadgeFor(mode) + reviewTag + "</div>" +
-        '<div class="dcard-meta"><span>decided ' + esc(d.decided) + '</span><span>owner: ' + esc(d.owner) + '</span><span>needs ' + LEVEL_LABEL[d.visibility] + "</span></div>";
-      var body;
-      if (mode === "source") body = '<div class="dcard-body">' + decisionSections(d) + "</div>";
-      else if (mode === "derived") body = '<div class="dcard-body"><div class="locked-notice">🔒 Raw decision record requires ' + LEVEL_LABEL[d.visibility] + ' clearance. You are seeing derived context only.</div><div class="derived-notice">' + esc(d.derived) + "</div></div>";
-      else body = '<div class="dcard-body"><div class="locked-notice">🔒 This record and its derived context both require higher clearance than you currently have.</div></div>';
-      card.innerHTML = head + body;
-      grid.appendChild(card);
-    });
+      var matches = nodeMatchesBoardQuery(d, ui.boardQuery);
+      var classes = "board-node" + (mode !== "source" ? " locked" : "") + (mode === "derived" ? " derived" : "") +
+        ((mode === "source" && decisionNeedsReview(d)) ? " needs-review" : "") + (matches ? "" : " dimmed");
+      return '<div class="' + classes + '" style="left:' + pos.cx + '%;top:' + pos.cy + '%" data-node-id="' + esc(d.id) + '" tabindex="0">' +
+        '<button class="board-node-del" data-del-node="' + esc(d.id) + '" title="Delete this topic" aria-label="Delete this topic">✕</button>' +
+        '<div class="board-node-bubble">' + boardNodeIcon(d) + '</div>' +
+        '<div class="board-node-title">' + esc(d.title.length > 40 ? d.title.slice(0, 40) + "…" : d.title) + "</div>" +
+        "</div>";
+    }).join("");
+    board.innerHTML = '<svg class="board-lines" viewBox="0 0 100 100" preserveAspectRatio="none">' + linesHtml + "</svg>" +
+      '<div class="brain-core"><span>🧠</span><span class="board-count">' + countLabel + '</span></div>' + nodesHtml;
+
     document.querySelectorAll("[data-log-review]").forEach(function (btn) {
       btn.addEventListener("click", function () { logReviewOutcome(btn.getAttribute("data-log-review")); });
     });
+    document.querySelectorAll("[data-node-id]").forEach(function (el) {
+      var id = el.getAttribute("data-node-id");
+      el.addEventListener("click", function () { openBoardNode(id); });
+      el.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBoardNode(id); } });
+      el.addEventListener("mouseenter", function () {
+        var line = board.querySelector('[data-line-for="' + CSS.escape(id) + '"]');
+        if (line) line.classList.add("hot");
+      });
+      el.addEventListener("mouseleave", function () {
+        var line = board.querySelector('[data-line-for="' + CSS.escape(id) + '"]');
+        if (line) line.classList.remove("hot");
+      });
+    });
+    document.querySelectorAll("[data-del-node]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        deleteDecisionNode(btn.getAttribute("data-del-node"));
+      });
+    });
+  }
+  function openBoardNode(id) {
+    var company = currentCompany(), p = currentPersona();
+    var d = company.decisions.filter(function (x) { return x.id === id; })[0];
+    if (!d) return;
+    ui.boardOpenNodeId = id;
+    var mode = decisionView(p, d);
+    if (mode !== "source") logAccessLedger(company, p, d.id, d.title, mode, "Decision Memory");
+    var storyTag = d.viaStory ? '<span class="badge badge-story">Complete the Story</span>' : "";
+    var slackTag = d.viaSlack ? '<span class="badge badge-slack">Slack</span>' : "";
+    var chatTag = d.viaChat ? '<span class="badge badge-chat">Ask Cognex</span>' : "";
+    var vantageTag = d.viaVantage ? '<span class="badge badge-type">Vantage</span>' : "";
+    var reviewTag = (mode === "source" && decisionNeedsReview(d)) ? ' <span class="badge badge-review">Needs review</span>' : "";
+    var body;
+    if (mode === "source") body = '<div class="board-detail-body">' + decisionSections(d) + "</div>";
+    else if (mode === "derived") body = '<div class="locked-notice">🔒 Raw decision record requires ' + LEVEL_LABEL[d.visibility] + ' clearance. You are seeing derived context only.</div><div class="derived-notice">' + esc(d.derived) + "</div>";
+    else body = '<div class="locked-notice">🔒 This record and its derived context both require higher clearance than you currently have.</div>';
+    var overlay = document.getElementById("board-detail-overlay");
+    overlay.innerHTML = '<div class="modal-card">' +
+      '<div class="board-detail-head"><h3>' + esc(d.title) + "</h3>" +
+      '<button class="board-detail-close" id="board-detail-close" aria-label="Close">✕</button></div>' +
+      '<div class="board-detail-meta">' + storyTag + slackTag + chatTag + vantageTag + sourceBadgeFor(mode) + reviewTag +
+      '<span>decided ' + esc(d.decided) + '</span><span>owner: ' + esc(d.owner) + '</span><span>needs ' + LEVEL_LABEL[d.visibility] + "</span></div>" +
+      body +
+      '<div class="board-detail-actions"><button class="btn-danger" id="board-detail-delete">Delete this topic</button></div>' +
+      "</div>";
+    overlay.style.display = "flex";
+    document.getElementById("board-detail-close").addEventListener("click", closeBoardNode);
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) closeBoardNode(); });
+    document.getElementById("board-detail-delete").addEventListener("click", function () { deleteDecisionNode(d.id); });
+  }
+  function closeBoardNode() {
+    ui.boardOpenNodeId = null;
+    var overlay = document.getElementById("board-detail-overlay");
+    overlay.style.display = "none";
+    overlay.innerHTML = "";
+  }
+  function deleteDecisionNode(id) {
+    var company = currentCompany();
+    var d = company.decisions.filter(function (x) { return x.id === id; })[0];
+    if (!d) return;
+    if (!confirm('Delete "' + d.title + '" from the company brain? This removes the whole topic — this can\'t be undone.')) return;
+    company.decisions = company.decisions.filter(function (x) { return x.id !== id; });
+    persistFireAndForget(apiV2("DELETE", "/companies/" + company.id + "/decisions/" + encodeURIComponent(id)));
+    if (ui.boardOpenNodeId === id) closeBoardNode();
+    renderDecisions();
   }
 
   function renderGoals() {
@@ -3085,7 +3436,7 @@
           '<div class="dcard-meta" style="padding:0"><span>reported by ' + esc(p.name) + '</span><span>today</span><span>visible company-wide</span></div>' +
           '<div class="story-draft-body"><div class="dcard-sec"><h4>Why</h4><ul>' + (d.why || []).map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + '</ul></div><div class="dcard-sec"><h4>Risks</h4><ul>' + (d.risks || []).map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div>" +
           (d.contributor_note ? '<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 16px">' + esc(d.contributor_note) + "</p>" : "") +
-          '<button id="story-save" class="btn-primary">Save to company memory</button></div>';
+          '<button id="story-save" class="btn-primary"' + (ss.saving ? " disabled" : "") + '>' + (ss.saving ? "Saving…" : "Save to company memory") + '</button></div>';
       }
     } else {
       html += '<div class="story-done"><div class="story-done-check">✓</div><div><div class="story-done-title">Added to company memory</div><div class="story-done-sub">Visible company-wide — anyone can now see why this work happened.</div></div></div>' +
@@ -3123,7 +3474,7 @@
     var company = currentCompany(), p = currentPersona();
     var ss = storyStateFor();
     var story = ss.story;
-    if (!story) return;
+    if (!story || ss.saving) return;
     var draft = ss.draft || { why: [ss.answers.why || ""], risks: [ss.answers.risk || ""], contributor_note: ss.answers.who || "", suggested_tags: [] };
     var dateStr = new Date().toISOString().slice(0, 10);
     storyCounter += 1;
@@ -3139,11 +3490,15 @@
       derived: story.workItem + " — context captured directly from " + p.name + ".",
       contributor: draft.contributor_note || ss.answers.who || "", viaStory: true,
     };
-    company.decisions.unshift(newDecision);
-    persistNewDecision(company, newDecision);
-    ss.saved = true;
-    state.tab = "story";
-    renderApp();
+    var bodyText = (draft.why || []).concat(draft.risks || []).filter(Boolean).join(" ") || story.workItem;
+    ss.saving = true;
+    renderStory();
+    consolidateThenSave(company, newDecision, "Complete the Story", bodyText, function () {
+      ss.saving = false;
+      ss.saved = true;
+      state.tab = "story";
+      renderApp();
+    });
   }
 
   /* ============ Slack integration (Admin tab) ============
@@ -3253,10 +3608,11 @@
           derived: row.title + " — captured automatically from a Slack conversation in #" + row.channel_name + ".",
           contributor: "", viaSlack: true,
         };
-        company.decisions.unshift(newDecision);
-        persistNewDecision(company, newDecision);
-        slackLoadCandidates();
-        renderApp();
+        var bodyText = (row.why && row.why.length ? row.why : [row.title]).join(" ");
+        consolidateThenSave(company, newDecision, "Slack #" + row.channel_name, bodyText, function () {
+          slackLoadCandidates();
+          renderApp();
+        });
       });
   }
 
@@ -3891,6 +4247,10 @@
   });
   document.getElementById("staff-login-modal").addEventListener("click", function (e) {
     if (e.target === this) closeStaffLoginModal();
+  });
+  document.getElementById("board-search").addEventListener("input", function () {
+    ui.boardQuery = this.value;
+    renderDecisions(); // only rewrites #brain-board's own innerHTML, so this input keeps its value/focus
   });
 
   renderProof();
