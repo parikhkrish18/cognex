@@ -963,6 +963,7 @@
           </div>
 
           <div class="panel panel-pad" id="tab-goals" style="display:none">
+            <div id="goal-admin-root"></div>
             <div id="goals-trace"></div>
             <div class="goal-col-title">Company goal → department → team → individual work</div>
             <div class="goal-tree" id="goal-tree"></div>
@@ -1374,7 +1375,7 @@
 
   /* ============ Session ============ */
   var session = { type: null }; // null | {type:'company', companyId, personaId, viaSupport} | {type:'platform'}
-  var ui = { loginError: "", wizard: null, editingMemberId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, platformCompanies: null, boardOpenNodeId: null, boardQuery: "" };
+  var ui = { loginError: "", wizard: null, editingMemberId: null, editingGoalId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, platformCompanies: null, boardOpenNodeId: null, boardQuery: "" };
 
   function currentCompany() {
     if (session.type === "company") return COMPANIES[session.companyId];
@@ -3293,6 +3294,7 @@
 
   function renderGoals() {
     var company = currentCompany(), p = currentPersona();
+    renderGoalAdmin(company, p);
     var traceWrap = document.getElementById("goals-trace");
     var ig = individualGoalFor(company, p);
     var pathIds = {};
@@ -3316,6 +3318,137 @@
       card.className = "goal-card depth-" + g.depth + (pathIds[g.id] ? " on-path" : "");
       card.innerHTML = '<div class="kicker">' + esc(g.kicker) + '</div><div class="gt">' + esc(g.title) + "</div>";
       tree.appendChild(card);
+    });
+  }
+
+  /* ============ Goal management (team admins) ============
+     Added 2026-08-30. Until now goals only ever existed as seed/demo data
+     — Ask Cognex's search_goals/get_goal_chain/get_my_context tools already
+     read whatever's in company.goals automatically, but there was no way
+     for a founder to put their own company's real goals into that data at
+     all. This is that: a real add/edit/delete UI, gated to team admins the
+     same way roster management is, sitting above the read-only tree
+     everyone already sees. Reparenting an existing goal isn't supported —
+     see the backend's GoalUpdateIn comment — delete and re-add it instead. */
+  function defaultGoalKicker(depth, dept, ownerName) {
+    if (ownerName) return "Individual work · " + ownerName;
+    if (depth === 0) return "Company goal";
+    if (dept) return dept + (depth === 1 ? " goal" : " team goal");
+    return depth === 1 ? "Department goal" : "Team goal";
+  }
+  function collectGoalSubtreeIds(company, rootId) {
+    var byParent = {};
+    company.goals.forEach(function (g) { (byParent[g.parent] = byParent[g.parent] || []).push(g); });
+    var ids = [], frontier = [rootId];
+    while (frontier.length) {
+      var id = frontier.pop();
+      ids.push(id);
+      (byParent[id] || []).forEach(function (child) { frontier.push(child.id); });
+    }
+    return ids;
+  }
+
+  function renderGoalAdmin(company, p) {
+    var root = document.getElementById("goal-admin-root");
+    if (!p.isOrgAdmin) { root.innerHTML = ""; return; }
+
+    var editing = ui.editingGoalId ? company.goals.filter(function (g) { return g.id === ui.editingGoalId; })[0] : null;
+    var deptList = Array.from(new Set(Object.keys(company.personas).map(function (id) { return company.personas[id].dept; }).filter(Boolean)));
+    var parentOptions = '<option value="">No parent — this is a company-level goal</option>' +
+      company.goals.filter(function (g) { return !editing || g.id !== editing.id; }).map(function (g) {
+        return '<option value="' + esc(g.id) + '">' + "— ".repeat(g.depth) + esc(g.title) + "</option>";
+      }).join("");
+    var ownerOptions = '<option value="">No individual owner</option>' + Object.keys(company.personas).map(function (id) {
+      var m = company.personas[id];
+      var sel = editing && editing.owner === id ? " selected" : "";
+      return '<option value="' + esc(id) + '"' + sel + ">" + esc(m.name) + " — " + esc(m.title) + "</option>";
+    }).join("");
+
+    root.innerHTML =
+      '<div class="section-title">' + (editing ? "Edit goal" : "Add a goal") + "</div>" +
+      '<div class="section-sub">' + (editing
+        ? "Moving a goal under a different parent isn't supported yet — remove it and add it again under the right one."
+        : "Every goal needs a parent (except a company-level one) so Ask Cognex and the alignment trace can show how it ladders up to company strategy.") + "</div>" +
+      '<form id="goal-form">' +
+      '<div class="form-grid">' +
+      '<div class="field"><label>Goal</label><input type="text" id="gf-title" value="' + (editing ? esc(editing.title) : "") + '" placeholder="e.g. Cut customer onboarding time by 30%" required /></div>' +
+      '<div class="field"><label>Label <span style="font-weight:400;color:var(--ink-faint)">(shown above the goal — leave blank to auto-fill)</span></label><input type="text" id="gf-kicker" value="' + (editing ? esc(editing.kicker || "") : "") + '" placeholder="e.g. Marketing goal" /></div>' +
+      (editing ? "" : '<div class="field"><label>Parent goal</label><select id="gf-parent">' + parentOptions + "</select></div>") +
+      '<div class="field"><label>Department</label><input type="text" id="gf-dept" list="goal-dept-options" value="' + (editing ? esc(editing.dept || "") : "") + '" placeholder="e.g. Marketing" />' +
+      '<datalist id="goal-dept-options">' + deptList.map(function (d) { return "<option value=\"" + esc(d) + "\">"; }).join("") + "</datalist></div>" +
+      '<div class="field"><label>Individual owner</label><select id="gf-owner">' + ownerOptions + "</select></div>" +
+      "</div>" +
+      '<div class="form-actions">' +
+      '<button type="submit" class="btn-primary">' + (editing ? "Save changes" : "Add goal") + "</button>" +
+      (editing ? '<button type="button" class="btn-secondary" id="gf-cancel">Cancel</button>' : "") +
+      "</div>" +
+      "</form>" +
+      (company.goals.length
+        ? '<div class="roster-table-wrap" style="margin-top:16px"><table class="roster-table"><thead><tr><th>Goal</th><th>Label</th><th>Parent</th><th>Owner</th><th></th></tr></thead><tbody>' +
+          company.goals.map(function (g) {
+            var parent = g.parent ? company.goals.filter(function (x) { return x.id === g.parent; })[0] : null;
+            var owner = g.owner ? company.personas[g.owner] : null;
+            return "<tr><td>" + esc(g.title) + "</td><td>" + esc(g.kicker || "—") + "</td><td>" + (parent ? esc(parent.title) : "—") + "</td><td>" + (owner ? esc(owner.name) : "—") + "</td>" +
+              '<td><div class="roster-actions"><button class="btn-secondary" data-edit-goal="' + esc(g.id) + '">Edit</button><button class="btn-danger" data-remove-goal="' + esc(g.id) + '">Remove</button></div></td></tr>';
+          }).join("") + "</tbody></table></div>"
+        : "") +
+      '<hr class="sep" />';
+
+    document.getElementById("goal-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var title = document.getElementById("gf-title").value.trim();
+      var kickerInput = document.getElementById("gf-kicker").value.trim();
+      var dept = document.getElementById("gf-dept").value.trim() || null;
+      var ownerId = document.getElementById("gf-owner").value || null;
+      var ownerName = ownerId && company.personas[ownerId] ? company.personas[ownerId].name : "";
+      if (!title) return;
+
+      if (editing) {
+        var kicker = kickerInput || defaultGoalKicker(editing.depth, dept, ownerName);
+        Object.assign(editing, { title: title, kicker: kicker, dept: dept, owner: ownerId });
+        persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/goals/" + encodeURIComponent(editing.id), {
+          title: title, kicker: kicker, dept: dept, owner: ownerId,
+        }));
+        ui.editingGoalId = null;
+      } else {
+        var parentId = document.getElementById("gf-parent").value || null;
+        var parent = parentId ? company.goals.filter(function (g) { return g.id === parentId; })[0] : null;
+        var depth = parent ? parent.depth + 1 : 0;
+        var kicker2 = kickerInput || defaultGoalKicker(depth, dept, ownerName);
+        var id = "g-" + slugify(title);
+        if (company.goals.some(function (g) { return g.id === id; })) id = id + "-" + (company.goals.length + 1);
+        var g = { id: id, title: title, kicker: kicker2, depth: depth, parent: parentId, dept: dept, owner: ownerId };
+        company.goals.push(g);
+        persistFireAndForget(apiV2("POST", "/companies/" + company.id + "/goals", g));
+      }
+      renderGoals();
+    });
+
+    var cancelBtn = document.getElementById("gf-cancel");
+    if (cancelBtn) cancelBtn.addEventListener("click", function () { ui.editingGoalId = null; renderGoals(); });
+
+    document.querySelectorAll("[data-edit-goal]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        ui.editingGoalId = btn.getAttribute("data-edit-goal");
+        renderGoals();
+        var panel = document.getElementById("goal-admin-root");
+        if (panel) window.scrollTo({ top: panel.getBoundingClientRect().top + window.scrollY - 20, behavior: "smooth" });
+      });
+    });
+    document.querySelectorAll("[data-remove-goal]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-remove-goal");
+        var g = company.goals.filter(function (x) { return x.id === id; })[0];
+        if (!g) return;
+        var subtreeIds = collectGoalSubtreeIds(company, id);
+        var extra = subtreeIds.length - 1;
+        var msg = 'Remove "' + g.title + '"' + (extra > 0 ? " and its " + extra + " sub-goal" + (extra === 1 ? "" : "s") : "") + "?";
+        if (!confirm(msg)) return;
+        company.goals = company.goals.filter(function (x) { return subtreeIds.indexOf(x.id) === -1; });
+        if (ui.editingGoalId && subtreeIds.indexOf(ui.editingGoalId) !== -1) ui.editingGoalId = null;
+        persistFireAndForget(apiV2("DELETE", "/companies/" + company.id + "/goals/" + encodeURIComponent(id)));
+        renderGoals();
+      });
     });
   }
 

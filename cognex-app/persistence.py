@@ -395,6 +395,14 @@ def add_goal(company_id: str, req: GoalIn):
 
 class GoalUpdateIn(BaseModel):
     owner: Optional[str] = None
+    title: Optional[str] = None
+    kicker: Optional[str] = None
+    dept: Optional[str] = None
+    # Deliberately no `parent`/`depth` here — reparenting would mean
+    # recomputing depth for every descendant too (goal-alignment tracing
+    # walks the parent chain assuming depth is consistent with position in
+    # the tree). Out of scope for this pass: to move a goal, delete and
+    # recreate it under the right parent instead.
 
 
 @router.put("/companies/{company_id}/goals/{goal_id}")
@@ -405,8 +413,44 @@ def update_goal(company_id: str, goal_id: str, req: GoalUpdateIn):
             raise HTTPException(status_code=404, detail="No such goal.")
         if req.owner is not None:
             g.owner = req.owner
+        if req.title is not None:
+            g.title = req.title
+        if req.kicker is not None:
+            g.kicker = req.kicker
+        if req.dept is not None:
+            g.dept = req.dept
         db.commit()
         return _goal_json(g)
+
+
+@router.delete("/companies/{company_id}/goals/{goal_id}")
+def delete_goal(company_id: str, goal_id: str):
+    # Added 2026-08-30 alongside the founder-facing "add a goal" UI — until
+    # now goals only ever existed as seed data, so nothing needed deleting.
+    # Cascades to descendants: a goal's whole reason for being is its place
+    # in the parent chain (goal-alignment tracing walks it), so deleting a
+    # department goal but leaving its team/individual goals pointing at a
+    # parent that no longer exists would silently break that trace rather
+    # than just removing what the admin asked to remove.
+    with get_session() as db:
+        g = db.get(Goal, (company_id, goal_id))
+        if not g:
+            raise HTTPException(status_code=404, detail="No such goal.")
+        all_goals = db.execute(select(Goal).where(Goal.company_id == company_id)).scalars().all()
+        by_parent = {}
+        for other in all_goals:
+            by_parent.setdefault(other.parent, []).append(other)
+        to_delete = []
+        frontier = [g]
+        while frontier:
+            cur = frontier.pop()
+            to_delete.append(cur)
+            frontier.extend(by_parent.get(cur.id, []))
+        deleted_ids = [d.id for d in to_delete]
+        for d in to_delete:
+            db.delete(d)
+        db.commit()
+        return {"ok": True, "deletedIds": deleted_ids}
 
 
 # ---------------------------------------------------------------------------
