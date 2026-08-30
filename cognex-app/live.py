@@ -32,13 +32,113 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+import base64
+import uuid
+
 from anthropic import Anthropic
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
+from openai import OpenAI
 from pydantic import BaseModel
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 MAX_TOOL_ROUNDS = 8
+
+# ---------------------------------------------------------------------------
+# Real image generation — added 2026-08-29 so Ask Cognex can actually
+# produce an image, not just describe one in words. Claude itself has no
+# image-generation capability, so this is a CUSTOM tool (like
+# search_decisions below, not a server tool like web_search) whose
+# implementation calls OpenAI's image API directly and hands the result
+# back into the SAME Claude conversation as a generated file — Claude
+# decides when a request actually calls for an image, generates it
+# mid-turn, and can keep talking (captioning it, tying it to company
+# context) in the same streamed answer, exactly like a code_execution chart
+# already works. This was a deliberate choice over routing image requests
+# to a different chat model entirely: that would lose company-memory
+# grounding, streaming, and the ability to combine an image with everything
+# else Ask Cognex already knows how to do in one answer.
+#
+# Model/quality are env-configurable rather than hardcoded, since OpenAI's
+# image lineup and pricing tiers both change over time (gpt-image-2 as of
+# this writing, replacing gpt-image-1.5 and the original gpt-image-1) and
+# quality is a real cost/fidelity trade-off (roughly $0.006/$0.05/$0.21 per
+# 1024x1024 image at low/medium/high) — "medium" is the founder's chosen
+# default, per their own explicit call, not a guess.
+OPENAI_IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-2")
+OPENAI_IMAGE_QUALITY = os.environ.get("OPENAI_IMAGE_QUALITY", "medium")
+
+# Generated images are opaque bytes with no home in Anthropic's Files API
+# (they never came from Anthropic) — kept in this process's own memory
+# instead, under an "img-" prefixed id namespace that GET /api/files/{id}
+# and _resolve_files() below both recognize and branch on, so the frontend
+# needs zero changes: it already renders anything in a turn's `files[]` via
+# that same endpoint regardless of where the bytes actually came from.
+# Deliberately NOT persisted to Postgres (avoids bloating the database with
+# binary blobs for what's meant to be a short-lived, view-and-download
+# artifact) and bounded to the most recent 200 images so this can't grow
+# unbounded over a long-running process — this does mean a generated image
+# stops being viewable after a redeploy/restart, or once 200 newer ones
+# have been generated, which is an acceptable trade-off at this app's scale
+# but worth knowing if usage grows.
+_GENERATED_IMAGES: "dict[str, dict]" = {}
+_GENERATED_IMAGES_MAX = 200
+
+
+def _store_generated_image(image_bytes: bytes, mime_type: str, filename: str) -> str:
+    if len(_GENERATED_IMAGES) >= _GENERATED_IMAGES_MAX:
+        oldest_id = next(iter(_GENERATED_IMAGES))
+        del _GENERATED_IMAGES[oldest_id]
+    file_id = "img-" + uuid.uuid4().hex
+    _GENERATED_IMAGES[file_id] = {"bytes": image_bytes, "mime_type": mime_type, "filename": filename, "size_bytes": len(image_bytes)}
+    return file_id
+
+
+GENERATE_IMAGE_SCHEMA = {
+    "name": "generate_image",
+    "description": (
+        "Generate a real image from a text description (an illustration, logo concept, mockup, "
+        "social/marketing graphic, or any other visual asset someone asks to be CREATED). Returns "
+        "the generated image as a file the person can view and download. Do NOT use this for a "
+        "chart, graph, or plot of data or numbers — use code_execution for that instead, since it "
+        "produces an accurate chart from real values rather than an AI-imagined picture of one."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "prompt": {"type": "string", "description": "A clear, detailed, self-contained description of the image to generate — the image model has no other context, so include style, subject, composition, and any specifics that matter."},
+            "size": {"type": "string", "enum": ["1024x1024", "1024x1536", "1536x1024"], "description": "Image dimensions. Default to the square size unless the request clearly implies a portrait or landscape shape."},
+        },
+        "required": ["prompt"],
+    },
+}
+
+
+def generate_image(prompt: str, size: str = "1024x1024") -> dict:
+    """Implementation behind the generate_image tool. Returns a small dict
+    (not the raw image) as the tool_result Claude sees — just enough for
+    Claude to know it worked and talk about it; the actual bytes are
+    resolved into the turn's files[] separately (see _resolve_files),
+    mirroring exactly how a code_execution-generated chart's file_id
+    already flows through this same pipeline."""
+    if not os.environ.get("OPENAI_API_KEY"):
+        return {"error": "Image generation isn't configured yet — OPENAI_API_KEY is not set on the server."}
+    if size not in ("1024x1024", "1024x1536", "1536x1024"):
+        size = "1024x1024"
+    try:
+        client = OpenAI()
+        result = client.images.generate(
+            model=OPENAI_IMAGE_MODEL, prompt=prompt, size=size,
+            quality=OPENAI_IMAGE_QUALITY, n=1, output_format="png",
+        )
+        item = (result.data or [None])[0]
+        if not item or not item.b64_json:
+            return {"error": "The image model returned no image data."}
+        image_bytes = base64.b64decode(item.b64_json)
+    except Exception as e:
+        return {"error": f"Image generation failed: {e}"}
+    file_id = _store_generated_image(image_bytes, "image/png", "generated-image.png")
+    return {"file_id": file_id, "prompt": prompt}
 
 # ---------------------------------------------------------------------------
 # Real web search + real web fetch + real code execution — added 2026-08-29
@@ -222,6 +322,7 @@ TOOL_SCHEMAS = [
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
+    GENERATE_IMAGE_SCHEMA,
 ]
 
 
@@ -316,6 +417,7 @@ def _make_tool_impls(persona: Persona, decisions: list, goals: list):
         "search_goals": lambda tool_input: search_goals(tool_input.get("query", "")),
         "get_goal_chain": lambda tool_input: get_goal_chain(tool_input.get("goal_id", "")),
         "get_my_context": lambda tool_input: get_my_context(),
+        "generate_image": lambda tool_input: generate_image(tool_input.get("prompt", ""), tool_input.get("size", "1024x1024")),
     }
 
 
@@ -373,7 +475,7 @@ working code with explanation when asked to write code, thorough research or doc
 asked for it. Do not artificially shorten an answer that deserves depth — match length and
 structure to what the question actually needs, not to a fixed target.
 
-You have three real capabilities beyond your own training, and you should reach for them whenever
+You have four real capabilities beyond your own training, and you should reach for them whenever
 they would make an answer better rather than defaulting to a prose guess:
 - Web search: use it for anything current, time-sensitive, or better answered with a real source
   (prices, news, a competitor's current product, a fact you're not fully certain of) — don't
@@ -391,6 +493,13 @@ they would make an answer better rather than defaulting to a prose guess:
   data analysis, or a chart — run the numbers for real instead of estimating them in prose, and
   generate an actual chart image when a visualization would help instead of describing one in
   words. If the person gives you data (pasted numbers, a table), work with it directly in code.
+- Image generation: use it when someone asks you to actually CREATE a visual asset — an
+  illustration, a logo concept, a mockup, a social/marketing graphic, or any other picture that
+  doesn't come from real data. Write a clear, detailed, self-contained prompt (the image model has
+  no other context — describe subject, style, and composition explicitly) rather than a short
+  restatement of the request. Do NOT use this for a chart, graph, or plot of real numbers — use
+  code_execution for that instead, since it draws an accurate chart from real values rather than
+  an AI-imagined picture of one.
 
 You ALSO have privileged, permission-filtered access to this company's Decision Memory and Goal
 graph through your tools. Use them whenever a question is actually about this company's
@@ -445,12 +554,25 @@ def _resolve_files(client, file_ids: list) -> list:
     """Turn raw file_ids into {id, filename, mimeType, sizeBytes} the frontend
     can render (an inline image for a chart, a download link otherwise) via
     GET /api/files/{id}. A metadata lookup failure doesn't drop the file
-    entirely — the id is still usable — it just won't have a nice filename."""
+    entirely — the id is still usable — it just won't have a nice filename.
+
+    An "img-" prefixed id is one of our own OpenAI-generated images (see
+    _GENERATED_IMAGES above) and never came from Anthropic's Files API, so
+    those are resolved straight out of the in-process store instead of
+    calling client.files.retrieve_metadata (which would just 404 on an id
+    Anthropic has never heard of)."""
     files, seen = [], set()
     for fid in file_ids:
         if fid in seen:
             continue
         seen.add(fid)
+        if fid.startswith("img-"):
+            rec = _GENERATED_IMAGES.get(fid)
+            if rec:
+                files.append({"id": fid, "filename": rec["filename"], "mimeType": rec["mime_type"], "sizeBytes": rec["size_bytes"]})
+            else:
+                files.append({"id": fid, "filename": "generated-image.png", "mimeType": "image/png", "sizeBytes": None})
+            continue
         try:
             meta = client.files.retrieve_metadata(fid)
             files.append({"id": fid, "filename": meta.filename, "mimeType": meta.mime_type, "sizeBytes": meta.size_bytes})
@@ -495,6 +617,12 @@ def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message:
             result = fn(block.input)
             tool_call_log.append({"name": block.name, "input": block.input, "result": result})
             tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)})
+            # generate_image's file_id lives inside its own JSON tool result,
+            # not in a *_tool_result content block the way a server tool's
+            # output does — _extract_file_ids can't see it, so it's pulled
+            # out here instead.
+            if block.name == "generate_image" and isinstance(result, dict) and result.get("file_id"):
+                file_ids.append(result["file_id"])
 
         if not tool_results:
             # Every tool_use block in this round was a server tool already
@@ -532,6 +660,7 @@ def _status_label_for(block_type: str, tool_name: str) -> str:
         "search_goals": "Searching company goals…",
         "get_goal_chain": "Tracing goal alignment…",
         "get_my_context": "Checking your role and context…",
+        "generate_image": "Generating an image…",
     }.get(tool_name, "Thinking…")
 
 
@@ -594,6 +723,8 @@ def run_agent_turn_stream(persona: Persona, decisions: list, goals: list, user_m
             result = fn(block.input)
             tool_call_log.append({"name": block.name, "input": block.input, "result": result})
             tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)})
+            if block.name == "generate_image" and isinstance(result, dict) and result.get("file_id"):
+                file_ids.append(result["file_id"])
 
         if not tool_results:
             continue
@@ -689,7 +820,21 @@ def get_generated_file(file_id: str):
     entry) and these ids are opaque, short-lived, and only ever handed to the
     same session that asked the question that generated them. Real per-user
     file access control is part of the same future "real authentication"
-    phase already tracked for the rest of the app."""
+    phase already tracked for the rest of the app.
+
+    An "img-" prefixed id is an OpenAI-generated image served straight out of
+    the in-process _GENERATED_IMAGES store (see the image-generation block
+    near the top of this file) rather than Anthropic's Files API — those ids
+    never existed on Anthropic's side at all."""
+    if file_id.startswith("img-"):
+        rec = _GENERATED_IMAGES.get(file_id)
+        if not rec:
+            raise HTTPException(status_code=404, detail=f"Generated image '{file_id}' was not found — it may have expired (only the most recent {_GENERATED_IMAGES_MAX} images are kept) or the server may have restarted since it was generated.")
+        return Response(
+            content=rec["bytes"],
+            media_type=rec["mime_type"] or "application/octet-stream",
+            headers={"Content-Disposition": f'inline; filename="{rec["filename"] or file_id}"'},
+        )
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
     client = Anthropic()
