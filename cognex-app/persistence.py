@@ -33,7 +33,7 @@ from sqlalchemy import select
 from datetime import datetime, timezone
 
 from db_postgres import get_session
-from models import ChatThread, Company, Decision, Goal, Persona
+from models import ChatThread, Company, CompanyUsage, Decision, Goal, Handoff, LedgerEntry, Persona
 
 router = APIRouter(prefix="/api/v2")
 
@@ -130,15 +130,43 @@ def _goal_json(g: Goal) -> dict:
     return out
 
 
+def _handoff_json(h: Handoff) -> dict:
+    return {
+        "id": h.id, "fromPersonaId": h.from_persona_id, "fromName": h.from_name,
+        "fromTitle": h.from_title, "fromDept": h.from_dept, "toPersonaId": h.to_persona_id,
+        "createdAt": h.created_at, "qaPairs": h.qa_pairs or [], "report": h.report or {},
+        "offline": h.offline, "delegationItems": h.delegation_items or [], "status": h.status,
+    }
+
+
+def _ledger_json(e: LedgerEntry) -> dict:
+    return {
+        "id": e.id, "ts": e.ts, "personaId": e.persona_id, "personaName": e.persona_name,
+        "personaTitle": e.persona_title, "decisionId": e.decision_id, "decisionTitle": e.decision_title,
+        "access": e.access, "via": e.via,
+    }
+
+
 def _company_snapshot(db, company: Company) -> dict:
     personas = db.execute(select(Persona).where(Persona.company_id == company.id)).scalars().all()
     decisions = db.execute(select(Decision).where(Decision.company_id == company.id)).scalars().all()
     goals = db.execute(select(Goal).where(Goal.company_id == company.id)).scalars().all()
+    handoffs = db.execute(
+        select(Handoff).where(Handoff.company_id == company.id).order_by(Handoff.created_at.desc())
+    ).scalars().all()
+    # Ledger entries are capped to the most recent 500 per company (see
+    # log_ledger_entry below, same cap the frontend already enforced
+    # locally) -- this is an audit trail, not unbounded storage.
+    ledger = db.execute(
+        select(LedgerEntry).where(LedgerEntry.company_id == company.id).order_by(LedgerEntry.ts.desc()).limit(500)
+    ).scalars().all()
     return {
         "id": company.id, "name": company.name, "industry": company.industry, "seeded": company.seeded,
         "personas": {p.id: _persona_json(p) for p in personas},
         "decisions": [_decision_json(d) for d in decisions],
         "goals": [_goal_json(g) for g in goals],
+        "handoffs": [_handoff_json(h) for h in handoffs],
+        "accessLedger": [_ledger_json(e) for e in ledger],
     }
 
 
@@ -569,3 +597,151 @@ def delete_thread(company_id: str, persona_id: str, thread_id: str):
         db.delete(t)
         db.commit()
         return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Handoffs — added 2026-08-31. Was sold as "Handoff Capture" (Business tier)
+# while living only in the browser tab's company.handoffs array; see
+# Handoff's docstring in models.py for the full reasoning. Create + update
+# only (no delete): a handoff is a historical record of a real departure —
+# finishHandoff marks it "done" and removes the departing PERSONA, it does
+# not remove the handoff itself, so there's deliberately no DELETE route.
+# ---------------------------------------------------------------------------
+class HandoffIn(BaseModel):
+    id: str
+    fromPersonaId: str = ""
+    fromName: str = ""
+    fromTitle: str = ""
+    fromDept: str = ""
+    toPersonaId: str = ""
+    createdAt: str = ""
+    qaPairs: list = []
+    report: dict = {}
+    offline: bool = False
+    delegationItems: list = []
+    status: str = "pending"
+
+
+@router.post("/companies/{company_id}/handoffs")
+def create_handoff(company_id: str, req: HandoffIn):
+    with get_session() as db:
+        _get_company_or_404(db, company_id)
+        h = Handoff(
+            company_id=company_id, id=req.id,
+            from_persona_id=req.fromPersonaId, from_name=req.fromName, from_title=req.fromTitle,
+            from_dept=req.fromDept, to_persona_id=req.toPersonaId, created_at=req.createdAt or _now_iso(),
+            qa_pairs=req.qaPairs, report=req.report, offline=req.offline,
+            delegation_items=req.delegationItems, status=req.status,
+        )
+        db.add(h)
+        db.commit()
+        return _handoff_json(h)
+
+
+class HandoffUpdateIn(BaseModel):
+    status: Optional[str] = None
+    delegationItems: Optional[list] = None
+
+
+@router.put("/companies/{company_id}/handoffs/{handoff_id}")
+def update_handoff(company_id: str, handoff_id: str, req: HandoffUpdateIn):
+    """Covers both mutation paths the frontend has: assignDelegationItem
+    (rewrites delegationItems + bumps status to "delegating") and
+    finishHandoff (sets status to "done") — both just PUT whatever changed,
+    same partial-update shape as update_goal above."""
+    with get_session() as db:
+        h = db.get(Handoff, (company_id, handoff_id))
+        if not h:
+            raise HTTPException(status_code=404, detail="No such handoff.")
+        if req.status is not None:
+            h.status = req.status
+        if req.delegationItems is not None:
+            h.delegation_items = req.delegationItems
+        db.commit()
+        return _handoff_json(h)
+
+
+@router.get("/companies/{company_id}/handoffs")
+def list_handoffs(company_id: str):
+    with get_session() as db:
+        rows = db.execute(
+            select(Handoff).where(Handoff.company_id == company_id).order_by(Handoff.created_at.desc())
+        ).scalars().all()
+        return {"handoffs": [_handoff_json(h) for h in rows]}
+
+
+# ---------------------------------------------------------------------------
+# Access Ledger — added 2026-08-31. Was sold as "Access Ledger & audit
+# exports" (Enterprise tier) while living only in browser memory; see
+# LedgerEntry's docstring in models.py. Append-only by design (no PUT/DELETE
+# routes) — an audit trail that could be edited or removed after the fact
+# isn't an audit trail. A bulk endpoint exists alongside the single-entry
+# one because logDecisionMemoryAccess can log many entries in one JS loop
+# (once per visible decision, every time the Decision Memory tab opens) —
+# without it, opening that tab would fire one HTTP request per decision.
+# ---------------------------------------------------------------------------
+class LedgerEntryIn(BaseModel):
+    id: str
+    ts: str = ""
+    personaId: str = ""
+    personaName: str = ""
+    personaTitle: str = ""
+    decisionId: str = ""
+    decisionTitle: str = ""
+    access: str = ""
+    via: str = ""
+
+
+def _write_ledger_entries(db, company_id: str, entries: list):
+    for req in entries:
+        db.add(LedgerEntry(
+            company_id=company_id, id=req.id, ts=req.ts or _now_iso(),
+            persona_id=req.personaId, persona_name=req.personaName, persona_title=req.personaTitle,
+            decision_id=req.decisionId, decision_title=req.decisionTitle, access=req.access, via=req.via,
+        ))
+    db.commit()
+    # Cap to the most recent 500 rows for this company, same limit the
+    # frontend already enforced locally before this endpoint existed — an
+    # audit trail here is meant to catch recent, actionable access patterns,
+    # not grow without bound.
+    rows = db.execute(
+        select(LedgerEntry.id).where(LedgerEntry.company_id == company_id).order_by(LedgerEntry.ts.desc())
+    ).scalars().all()
+    if len(rows) > 500:
+        stale_ids = rows[500:]
+        db.execute(
+            LedgerEntry.__table__.delete().where(
+                LedgerEntry.company_id == company_id, LedgerEntry.id.in_(stale_ids)
+            )
+        )
+        db.commit()
+
+
+@router.post("/companies/{company_id}/ledger")
+def create_ledger_entry(company_id: str, req: LedgerEntryIn):
+    with get_session() as db:
+        _get_company_or_404(db, company_id)
+        _write_ledger_entries(db, company_id, [req])
+        return {"ok": True}
+
+
+class LedgerBulkIn(BaseModel):
+    entries: list[LedgerEntryIn] = []
+
+
+@router.post("/companies/{company_id}/ledger/bulk")
+def create_ledger_entries_bulk(company_id: str, req: LedgerBulkIn):
+    with get_session() as db:
+        _get_company_or_404(db, company_id)
+        if req.entries:
+            _write_ledger_entries(db, company_id, req.entries)
+        return {"ok": True, "count": len(req.entries)}
+
+
+@router.get("/companies/{company_id}/ledger")
+def list_ledger(company_id: str):
+    with get_session() as db:
+        rows = db.execute(
+            select(LedgerEntry).where(LedgerEntry.company_id == company_id).order_by(LedgerEntry.ts.desc()).limit(500)
+        ).scalars().all()
+        return {"entries": [_ledger_json(e) for e in rows]}

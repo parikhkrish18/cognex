@@ -192,6 +192,105 @@ SERVER_TOOLS = [
 
 LEVEL_LABEL = {1: "Company-wide", 2: "Employee+", 3: "Manager+", 4: "Director+", 5: "Executive", 6: "CEO only"}
 
+# ---------------------------------------------------------------------------
+# Basic per-company rate limit + cost cap — added 2026-08-31 after an audit
+# found nothing stopped one user (or anyone who had the shared demo
+# password) from running up an unbounded Anthropic/OpenAI bill: unlimited
+# Ask Cognex turns, each able to call web_search/code_execution/
+# generate_image with no per-company ceiling anywhere. Deliberately basic,
+# not a billing system:
+#
+# - The RATE limit is a short in-memory sliding window (bursts, not spend) —
+#   it doesn't need to survive a restart, since its only job is smoothing a
+#   short burst of requests, not tracking cumulative usage.
+# - The COST cap is a running per-company, per-calendar-month estimated-
+#   dollar total, persisted to Postgres (CompanyUsage in models.py) so it
+#   actually survives a redeploy — a cap that resets every deploy isn't a
+#   cap. Cost is estimated from real token/image usage at the same published
+#   per-unit prices used in this project's own unit-economics work ($3/MTok
+#   input, $15/MTok output for Claude; OpenAI image cost by quality tier) —
+#   this is a circuit breaker against runaway spend, not reconciled billing.
+#
+# Both are env-configurable so the founder can raise/lower them per
+# environment without a code change.
+COMPANY_MONTHLY_CAP_USD = float(os.environ.get("COGNEX_COMPANY_MONTHLY_CAP_USD", "15"))
+CLAUDE_INPUT_USD_PER_MTOK = 3.00
+CLAUDE_OUTPUT_USD_PER_MTOK = 15.00
+IMAGE_COST_USD = {"low": 0.006, "medium": 0.05, "high": 0.21}
+
+_RATE_WINDOW_SECONDS = 60
+_RATE_MAX_PER_WINDOW = int(os.environ.get("COGNEX_COMPANY_RATE_PER_MIN", "20"))
+_rate_state: "dict[str, list]" = {}  # company_id -> unix timestamps within the current window
+
+
+def _check_rate_limit(company_id: str):
+    if not company_id:
+        return  # no company_id given (e.g. an old cached frontend) — nothing to key the limit on; fails open, not closed
+    import time
+    now = time.time()
+    bucket = _rate_state.setdefault(company_id, [])
+    cutoff = now - _RATE_WINDOW_SECONDS
+    while bucket and bucket[0] < cutoff:
+        bucket.pop(0)
+    if len(bucket) >= _RATE_MAX_PER_WINDOW:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many requests from this company in the last minute (limit {_RATE_MAX_PER_WINDOW}/min) — wait a moment and try again.",
+        )
+    bucket.append(now)
+
+
+def _current_usage_period() -> str:
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m")
+
+
+def _check_cost_cap(company_id: str):
+    if not company_id:
+        return
+    from db_postgres import get_session
+    from models import CompanyUsage
+    period = _current_usage_period()
+    with get_session() as db:
+        row = db.get(CompanyUsage, (company_id, period))
+        spent = (row.estimated_cost_cents / 100.0) if row else 0.0
+    if spent >= COMPANY_MONTHLY_CAP_USD:
+        raise HTTPException(
+            status_code=429,
+            detail=f"This company has reached its usage cap for this month (${COMPANY_MONTHLY_CAP_USD:.2f}). Contact Cognex to raise it.",
+        )
+
+
+def _record_cost(company_id: str, usd: float):
+    if not company_id or usd <= 0:
+        return
+    from db_postgres import get_session
+    from models import CompanyUsage
+    period = _current_usage_period()
+    cents = round(usd * 100)
+    with get_session() as db:
+        row = db.get(CompanyUsage, (company_id, period))
+        if row:
+            row.estimated_cost_cents += cents
+        else:
+            db.add(CompanyUsage(company_id=company_id, period=period, estimated_cost_cents=cents))
+        db.commit()
+
+
+def _usage_cost_usd(usage) -> float:
+    """Estimated USD cost of one Claude response.usage object. Never raises
+    on a missing/odd-shaped usage object — a cost estimate that fails to
+    compute should degrade to "count it as free this round," not break the
+    actual answer the person is waiting on."""
+    if not usage:
+        return 0.0
+    try:
+        inp = getattr(usage, "input_tokens", 0) or 0
+        out = getattr(usage, "output_tokens", 0) or 0
+        return (inp / 1_000_000.0) * CLAUDE_INPUT_USD_PER_MTOK + (out / 1_000_000.0) * CLAUDE_OUTPUT_USD_PER_MTOK
+    except Exception:
+        return 0.0
+
 
 # ---------------------------------------------------------------------------
 # Request-scoped data shapes (mirrors the frontend's camelCase JS objects)
@@ -618,7 +717,13 @@ def _resolve_files(client, file_ids: list) -> list:
     return files
 
 
-def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message: str, history=None):
+def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message: str, history=None, company_id: str = ""):
+    # Rate/cap CHECKS deliberately live in the route handlers below, not
+    # here — an HTTPException raised from inside this function would get
+    # swallowed by the route's `except Exception: _log_and_raise_502(...)`
+    # and turned into a misleading 502. This function only RECORDS the
+    # actual cost incurred (see the `finally` block), regardless of which
+    # caller invoked it.
     client = Anthropic()
     impls = _make_tool_impls(persona, decisions, goals)
     messages = list(history or [])
@@ -626,54 +731,63 @@ def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message:
     tool_call_log = []
     file_ids = []
     all_tools = TOOL_SCHEMAS + SERVER_TOOLS
+    turn_cost_usd = 0.0
 
-    for _ in range(MAX_TOOL_ROUNDS):
-        response = client.messages.create(
-            model=MODEL, max_tokens=8192, system=_system_prompt(persona, decisions),
-            tools=all_tools, tool_choice={"type": "auto"}, messages=messages,
-        )
-        file_ids.extend(_extract_file_ids(response.content))
+    try:
+        for _ in range(MAX_TOOL_ROUNDS):
+            response = client.messages.create(
+                model=MODEL, max_tokens=8192, system=_system_prompt(persona, decisions),
+                tools=all_tools, tool_choice={"type": "auto"}, messages=messages,
+            )
+            turn_cost_usd += _usage_cost_usd(getattr(response, "usage", None))
+            file_ids.extend(_extract_file_ids(response.content))
 
-        if response.stop_reason != "tool_use":
-            final_text = "".join(block.text for block in response.content if block.type == "text")
-            return {"answer": final_text, "tool_calls": tool_call_log, "files": _resolve_files(client, file_ids)}
+            if response.stop_reason != "tool_use":
+                final_text = "".join(block.text for block in response.content if block.type == "text")
+                return {"answer": final_text, "tool_calls": tool_call_log, "files": _resolve_files(client, file_ids)}
 
-        messages.append({"role": "assistant", "content": response.content})
-        tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
+            messages.append({"role": "assistant", "content": response.content})
+            tool_results = []
+            for block in response.content:
+                if block.type != "tool_use":
+                    continue
+                # web_search / code_execution are Anthropic SERVER tools: the API
+                # executes them itself and the result is already inline in this
+                # same response (the paired *_tool_result block above) — only our
+                # own tools (search_decisions, get_decision, ...) need a
+                # client-supplied tool_result fed back in the next round.
+                if block.name not in impls:
+                    continue
+                fn = impls[block.name]
+                result = fn(block.input)
+                tool_call_log.append({"name": block.name, "input": block.input, "result": result})
+                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)})
+                # generate_image's file_id lives inside its own JSON tool result,
+                # not in a *_tool_result content block the way a server tool's
+                # output does — _extract_file_ids can't see it, so it's pulled
+                # out here instead.
+                if block.name == "generate_image" and isinstance(result, dict) and result.get("file_id"):
+                    file_ids.append(result["file_id"])
+                    turn_cost_usd += IMAGE_COST_USD.get(OPENAI_IMAGE_QUALITY, 0.05)
+
+            if not tool_results:
+                # Every tool_use block in this round was a server tool already
+                # resolved inline (stop_reason=="tool_use" should not normally
+                # happen in that case, but this keeps the loop from breaking if
+                # it ever does) — just let Claude continue from here.
                 continue
-            # web_search / code_execution are Anthropic SERVER tools: the API
-            # executes them itself and the result is already inline in this
-            # same response (the paired *_tool_result block above) — only our
-            # own tools (search_decisions, get_decision, ...) need a
-            # client-supplied tool_result fed back in the next round.
-            if block.name not in impls:
-                continue
-            fn = impls[block.name]
-            result = fn(block.input)
-            tool_call_log.append({"name": block.name, "input": block.input, "result": result})
-            tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)})
-            # generate_image's file_id lives inside its own JSON tool result,
-            # not in a *_tool_result content block the way a server tool's
-            # output does — _extract_file_ids can't see it, so it's pulled
-            # out here instead.
-            if block.name == "generate_image" and isinstance(result, dict) and result.get("file_id"):
-                file_ids.append(result["file_id"])
+            messages.append({"role": "user", "content": tool_results})
 
-        if not tool_results:
-            # Every tool_use block in this round was a server tool already
-            # resolved inline (stop_reason=="tool_use" should not normally
-            # happen in that case, but this keeps the loop from breaking if
-            # it ever does) — just let Claude continue from here.
-            continue
-        messages.append({"role": "user", "content": tool_results})
-
-    return {
-        "answer": "I wasn't able to settle on an answer within the tool-call budget for this turn — try a narrower question.",
-        "tool_calls": tool_call_log,
-        "files": _resolve_files(client, file_ids),
-    }
+        return {
+            "answer": "I wasn't able to settle on an answer within the tool-call budget for this turn — try a narrower question.",
+            "tool_calls": tool_call_log,
+            "files": _resolve_files(client, file_ids),
+        }
+    finally:
+        # Recorded even on an exception mid-turn (a partial multi-round turn
+        # that then fails shouldn't be "free") and even on the tool-budget-
+        # exceeded fallback above, not just the success path.
+        _record_cost(company_id, turn_cost_usd)
 
 
 def _status_label_for(block_type: str, tool_name: str) -> str:
@@ -701,7 +815,7 @@ def _status_label_for(block_type: str, tool_name: str) -> str:
     }.get(tool_name, "Thinking…")
 
 
-def run_agent_turn_stream(persona: Persona, decisions: list, goals: list, user_message: str, history=None):
+def run_agent_turn_stream(persona: Persona, decisions: list, goals: list, user_message: str, history=None, company_id: str = ""):
     """Same agentic tool-use loop as run_agent_turn, but a generator that
     yields small dicts as things actually happen, instead of computing the
     whole answer and handing it back in one lump: {"event": "status", ...}
@@ -720,6 +834,11 @@ def run_agent_turn_stream(persona: Persona, decisions: list, goals: list, user_m
     left in place rather than replaced, since it's simpler for anything
     that doesn't need incremental rendering (and is what test_offline.py
     and any future non-streaming caller can keep using unchanged)."""
+    # Rate/cap CHECKS live in the route handler (ask_stream), before this
+    # generator is ever constructed — see run_agent_turn's comment on why;
+    # the same reasoning applies here, plus a streaming response can't raise
+    # a normal HTTPException mid-stream anyway (the 200 + SSE headers are
+    # already committed). This function only RECORDS the cost incurred.
     client = Anthropic()
     impls = _make_tool_impls(persona, decisions, goals)
     messages = list(history or [])
@@ -727,52 +846,62 @@ def run_agent_turn_stream(persona: Persona, decisions: list, goals: list, user_m
     tool_call_log = []
     file_ids = []
     all_tools = TOOL_SCHEMAS + SERVER_TOOLS
+    turn_cost_usd = 0.0
 
-    for _ in range(MAX_TOOL_ROUNDS):
-        with client.messages.stream(
-            model=MODEL, max_tokens=8192, system=_system_prompt(persona, decisions),
-            tools=all_tools, tool_choice={"type": "auto"}, messages=messages,
-        ) as stream:
-            for event in stream:
-                if event.type == "content_block_start":
-                    block = event.content_block
-                    block_type = getattr(block, "type", None)
-                    if block_type in ("tool_use", "server_tool_use"):
-                        yield {"event": "status", "label": _status_label_for(block_type, block.name)}
-                elif event.type == "text":
-                    yield {"event": "text", "text": event.text}
-            response = stream.get_final_message()
+    try:
+        for _ in range(MAX_TOOL_ROUNDS):
+            with client.messages.stream(
+                model=MODEL, max_tokens=8192, system=_system_prompt(persona, decisions),
+                tools=all_tools, tool_choice={"type": "auto"}, messages=messages,
+            ) as stream:
+                for event in stream:
+                    if event.type == "content_block_start":
+                        block = event.content_block
+                        block_type = getattr(block, "type", None)
+                        if block_type in ("tool_use", "server_tool_use"):
+                            yield {"event": "status", "label": _status_label_for(block_type, block.name)}
+                    elif event.type == "text":
+                        yield {"event": "text", "text": event.text}
+                response = stream.get_final_message()
 
-        file_ids.extend(_extract_file_ids(response.content))
+            turn_cost_usd += _usage_cost_usd(getattr(response, "usage", None))
+            file_ids.extend(_extract_file_ids(response.content))
 
-        if response.stop_reason != "tool_use":
-            yield {"event": "done", "tool_calls": tool_call_log, "files": _resolve_files(client, file_ids)}
-            return
+            if response.stop_reason != "tool_use":
+                yield {"event": "done", "tool_calls": tool_call_log, "files": _resolve_files(client, file_ids)}
+                return
 
-        messages.append({"role": "assistant", "content": response.content})
-        tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
+            messages.append({"role": "assistant", "content": response.content})
+            tool_results = []
+            for block in response.content:
+                if block.type != "tool_use":
+                    continue
+                if block.name not in impls:
+                    continue
+                fn = impls[block.name]
+                result = fn(block.input)
+                tool_call_log.append({"name": block.name, "input": block.input, "result": result})
+                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)})
+                if block.name == "generate_image" and isinstance(result, dict) and result.get("file_id"):
+                    file_ids.append(result["file_id"])
+                    turn_cost_usd += IMAGE_COST_USD.get(OPENAI_IMAGE_QUALITY, 0.05)
+
+            if not tool_results:
                 continue
-            if block.name not in impls:
-                continue
-            fn = impls[block.name]
-            result = fn(block.input)
-            tool_call_log.append({"name": block.name, "input": block.input, "result": result})
-            tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)})
-            if block.name == "generate_image" and isinstance(result, dict) and result.get("file_id"):
-                file_ids.append(result["file_id"])
+            messages.append({"role": "user", "content": tool_results})
 
-        if not tool_results:
-            continue
-        messages.append({"role": "user", "content": tool_results})
-
-    yield {
-        "event": "done",
-        "answer_override": "I wasn't able to settle on an answer within the tool-call budget for this turn — try a narrower question.",
-        "tool_calls": tool_call_log,
-        "files": _resolve_files(client, file_ids),
-    }
+        yield {
+            "event": "done",
+            "answer_override": "I wasn't able to settle on an answer within the tool-call budget for this turn — try a narrower question.",
+            "tool_calls": tool_call_log,
+            "files": _resolve_files(client, file_ids),
+        }
+    finally:
+        # Same reasoning as run_agent_turn's finally: recorded on normal
+        # completion, on the tool-budget-exceeded fallback above, AND if an
+        # exception propagates out of this generator mid-stream — a partial
+        # turn that then fails still spent real tokens.
+        _record_cost(company_id, turn_cost_usd)
 
 
 # ---------------------------------------------------------------------------
@@ -839,6 +968,15 @@ class AskRequest(BaseModel):
     goals: list[GoalIn] = []
     message: str
     history: list = []
+    # Added 2026-08-31 to back the per-company rate limit + cost cap (see
+    # _check_rate_limit/_check_cost_cap above) — nothing in this request
+    # previously identified WHICH company a turn belonged to, so there was
+    # no key to cap or rate-limit by. Defaults to "" (rather than being
+    # required) so an old cached frontend that hasn't picked up this field
+    # yet degrades to "not rate-limited/capped" instead of a hard 422 —
+    # deliberately fails open here, the same trade-off _check_rate_limit and
+    # _check_cost_cap both already make for an empty company_id.
+    company_id: str = ""
 
 
 @router.get("/health")
@@ -892,11 +1030,17 @@ def get_generated_file(file_id: str):
 def ask(req: AskRequest):
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    # Deliberately BEFORE the try/except below: an HTTPException raised here
+    # (429 rate-limited or over the monthly cost cap) must reach the client
+    # as-is. Inside the try/except it would get caught by `except Exception`
+    # and rewritten into a misleading 502 "Model call failed".
+    _check_rate_limit(req.company_id)
+    _check_cost_cap(req.company_id)
     persona = Persona(**req.persona.model_dump())
     decisions = [Decision(**d.model_dump()) for d in req.decisions]
     goals = [Goal(**g.model_dump()) for g in req.goals]
     try:
-        return run_agent_turn(persona, decisions, goals, req.message, req.history)
+        return run_agent_turn(persona, decisions, goals, req.message, req.history, company_id=req.company_id)
     except Exception as e:
         _log_and_raise_502("ask", e)
 
@@ -921,13 +1065,20 @@ def ask_stream(req: AskRequest):
     offline-fallback path a non-streaming failure already produces."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    # Same reasoning as POST /ask: checked here, synchronously, BEFORE the
+    # StreamingResponse is ever constructed — this is the one place a real
+    # 429 can still reach the client for this route, since once the SSE
+    # response starts, only {"event": "error"} frames are possible (see the
+    # docstring above).
+    _check_rate_limit(req.company_id)
+    _check_cost_cap(req.company_id)
     persona = Persona(**req.persona.model_dump())
     decisions = [Decision(**d.model_dump()) for d in req.decisions]
     goals = [Goal(**g.model_dump()) for g in req.goals]
 
     def sse():
         try:
-            for event in run_agent_turn_stream(persona, decisions, goals, req.message, req.history):
+            for event in run_agent_turn_stream(persona, decisions, goals, req.message, req.history, company_id=req.company_id):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             import traceback

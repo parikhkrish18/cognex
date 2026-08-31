@@ -8,12 +8,18 @@ every reload and every Railway redeploy. The one exception was the Slack
 integration's own SQLite tables (see db.py). This module is the real
 database for the core objects: companies, people, decisions, and goals.
 
-Deliberately scoped: chat threads, Vantage gaps/plans, handoff records, and
-the access ledger are NOT modeled here yet — they stay session-only for now.
-See the 2026-08-27 "Real persistence" entry in the project's build log for
-the reasoning on why this slice first (it's the data that actually matters —
-the decisions and goals ARE the product — and the roster/company shell has
-to exist server-side before anything else can hang off it).
+Originally scoped to exclude chat threads, Vantage gaps/plans, handoff
+records, and the access ledger — see the 2026-08-27 "Real persistence" entry
+in the project's build log for the reasoning on why companies/personas/
+decisions/goals came first (they're the data that actually matters — the
+decisions and goals ARE the product — and the roster/company shell has to
+exist server-side before anything else can hang off it). Chat threads were
+added 2026-08-29 (see ChatThread below), and handoffs/the access ledger were
+added 2026-08-31 (see Handoff/LedgerEntry below) after an audit found both
+were being actively sold — Handoff Capture, Access Ledger & audit exports —
+while still living only in browser memory. Vantage gaps/plans remain
+session-only; they're not sold as a standalone persisted feature the way
+those two are.
 
 Uses plain `JSON` (not Postgres-specific `JSONB`) for list/dict columns so
 the exact same models also work against SQLite in tests — no behavior
@@ -109,6 +115,93 @@ class Goal(Base):
     parent: Mapped[str | None] = mapped_column(String, nullable=True)
     dept: Mapped[str | None] = mapped_column(String, nullable=True)
     owner: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (
+        ForeignKeyConstraint(["company_id"], ["companies.id"]),
+    )
+
+
+class Handoff(Base):
+    """A departing employee's captured handoff -- who's leaving, who it goes
+    to, the Q&A that produced it, the extracted report, and the delegation
+    checklist derived from it. Added 2026-08-31: this used to live only in
+    the browser tab's `company.handoffs` array (explicitly flagged in this
+    file's module docstring above as one of the pieces "NOT modeled here
+    yet"), even though Handoff Capture is a feature actively sold on the
+    Business tier -- a customer relying on it would find every handoff gone
+    after a Railway redeploy or a page reload. `id` is only unique within a
+    company, same convention as every other table here. `report` and
+    `delegation_items` are stored as whole JSON blobs (not normalized),
+    matching this file's existing convention for structured-but-never-
+    queried-into fields (see Decision.why, ChatThread.turns)."""
+
+    __tablename__ = "handoffs"
+
+    company_id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    from_persona_id: Mapped[str] = mapped_column(String, default="")
+    from_name: Mapped[str] = mapped_column(String, default="")
+    from_title: Mapped[str] = mapped_column(String, default="")
+    from_dept: Mapped[str] = mapped_column(String, default="")
+    to_persona_id: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[str] = mapped_column(String, default="")
+    qa_pairs: Mapped[list] = mapped_column(JSON, default=list)
+    report: Mapped[dict] = mapped_column(JSON, default=dict)
+    offline: Mapped[bool] = mapped_column(Boolean, default=False)
+    delegation_items: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String, default="pending")
+
+    __table_args__ = (
+        ForeignKeyConstraint(["company_id"], ["companies.id"]),
+    )
+
+
+class LedgerEntry(Base):
+    """One row of the Access Ledger -- who saw what, at what access tier,
+    via which surface (Decision Memory tab, Ask Cognex). Added 2026-08-31
+    for the same reason as Handoff above: sold as an Enterprise-tier
+    "Access Ledger & audit exports" feature while living only in browser
+    memory -- empty for a compliance reviewer the moment anyone reloaded
+    the page or the server redeployed, the opposite of what an audit trail
+    is for. `id` includes a client-generated random suffix (matching the
+    frontend's existing id scheme) since many entries can be created in the
+    same millisecond (logDecisionMemoryAccess logs one per visible decision
+    in a single loop)."""
+
+    __tablename__ = "ledger_entries"
+
+    company_id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    ts: Mapped[str] = mapped_column(String, default="")
+    persona_id: Mapped[str] = mapped_column(String, default="")
+    persona_name: Mapped[str] = mapped_column(String, default="")
+    persona_title: Mapped[str] = mapped_column(String, default="")
+    decision_id: Mapped[str] = mapped_column(String, default="")
+    decision_title: Mapped[str] = mapped_column(String, default="")
+    access: Mapped[str] = mapped_column(String, default="")
+    via: Mapped[str] = mapped_column(String, default="")
+
+    __table_args__ = (
+        ForeignKeyConstraint(["company_id"], ["companies.id"]),
+    )
+
+
+class CompanyUsage(Base):
+    """Cumulative ESTIMATED Anthropic/OpenAI spend for one company in one
+    calendar-month `period` ("YYYY-MM"), added 2026-08-31 to back a basic
+    per-company cost cap (see live.py's _check_cost_cap/_record_cost) after
+    an audit found nothing stopped one user -- or anyone who had the shared
+    demo password -- from running up an unbounded bill via unlimited Ask
+    Cognex/image-generation calls. Deliberately coarse: a running cents
+    total computed from real token/image usage at fixed published per-unit
+    prices, not a reconciled invoice. This exists to be a circuit breaker
+    against runaway spend, not a billing system."""
+
+    __tablename__ = "company_usage"
+
+    company_id: Mapped[str] = mapped_column(String, primary_key=True)
+    period: Mapped[str] = mapped_column(String, primary_key=True)
+    estimated_cost_cents: Mapped[int] = mapped_column(Integer, default=0)
 
     __table_args__ = (
         ForeignKeyConstraint(["company_id"], ["companies.id"]),

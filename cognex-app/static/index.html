@@ -570,6 +570,16 @@
   .field input, .field select { width: 100%; border: 1px solid var(--border); background: var(--bg); color: var(--ink); border-radius: 10px; padding: 11px 13px; font-size: 14px; font-family: inherit; }
   .field input:focus, .field select:focus { border-color: var(--accent); }
   .field-error { color: var(--red); font-size: 12.5px; margin-top: 8px; text-align: center; }
+
+  /* Background-save failure toast — see showSyncError()/persistFireAndForget() */
+  .sync-toast {
+    position: fixed; bottom: 22px; right: 22px; max-width: 340px; z-index: 999;
+    background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 12px;
+    font-size: 13px; line-height: 1.45; box-shadow: var(--shadow-md);
+    opacity: 0; transform: translateY(8px); pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+  }
+  .sync-toast.is-visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
   .divider { display: flex; align-items: center; gap: 10px; margin: 22px 0 16px; color: var(--ink-faint); font-size: 12px; }
   .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
   .quick-accounts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
@@ -1125,11 +1135,16 @@
   "use strict";
 
   var DEMO_PASSWORD = "cognex";
-  // Staff sign-in uses its own dedicated password, never shown in the UI —
-  // the button opens a password-only modal rather than exposing the staff
-  // email/password pair the way the old prompt()-based flow did.
+  // Staff sign-in uses its own dedicated password, checked ONLY by the
+  // server (POST /api/v2/login in persistence.py). Fixed 2026-08-31: this
+  // used to also keep a client-side copy of the real staff password here as
+  // an offline-fallback shortcut — meaning anyone who viewed this page's
+  // source got the literal staff password, regardless of whether that
+  // fallback path ever ran. Never store a real secret client-side just to
+  // support an offline fallback; see loginLocally()/signInLocally() below,
+  // which now fail closed (report "can't verify right now") instead of
+  // checking a password the browser has no business knowing.
   var STAFF_EMAIL = "admin@cognex.ai";
-  var STAFF_PASSWORD = "Admin@Cognex";
 
   /* ============ Levels ============ */
   var LEVEL = { intern: 1, employee: 2, manager: 3, director: 4, exec: 5, ceo: 6 };
@@ -1392,8 +1407,34 @@
     }
     return pump();
   }
+  // A small, self-appending toast for background save failures. Added
+  // 2026-08-31 per a UI audit finding: persistFireAndForget's writes (goal
+  // edits, roster edits, merged-decision saves, thread updates — basically
+  // every background save in the app) used to fail into console.warn only,
+  // so a customer whose edit didn't actually save had zero on-screen signal
+  // that anything went wrong — it just silently reverted on their next
+  // reload, which reads as "the app is unreliable" rather than "that one
+  // save failed, try again."
+  function showSyncError(message) {
+    var el = document.getElementById("sync-toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "sync-toast";
+      el.className = "sync-toast";
+      document.body.appendChild(el);
+    }
+    el.textContent = "⚠ " + message;
+    el.classList.add("is-visible");
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(function () { el.classList.remove("is-visible"); }, 6000);
+  }
   function persistFireAndForget(promise) {
-    if (promise && promise.catch) promise.catch(function (err) { console.warn("[cognex] persistence call failed:", err && err.message ? err.message : err); });
+    if (promise && promise.catch) {
+      promise.catch(function (err) {
+        console.warn("[cognex] persistence call failed:", err && err.message ? err.message : err);
+        showSyncError("A change didn't save — check your connection and try again.");
+      });
+    }
   }
   function serverCompanyToLocal(sc) {
     // Converts an /api/v2 company snapshot into the shape the rest of this
@@ -1405,14 +1446,29 @@
       personas: sc.personas || {}, decisions: sc.decisions || [], goals: sc.goals || [],
       stories: (existing && existing.stories) || {},
       memberCounter: (existing && existing.memberCounter) || Object.keys(sc.personas || {}).length,
-      handoffs: (existing && existing.handoffs) || [],
-      accessLedger: (existing && existing.accessLedger) || [],
+      // 2026-08-31: handoffs and the access ledger are now real, persisted
+      // server data (Handoff Capture / Access Ledger & audit exports are
+      // both sold features -- they used to be session-only, gone on every
+      // reload or redeploy). Read from the snapshot like decisions/goals
+      // instead of only ever falling back to whatever was already in this
+      // tab's local cache.
+      handoffs: sc.handoffs || (existing && existing.handoffs) || [],
+      accessLedger: sc.accessLedger || (existing && existing.accessLedger) || [],
       vantageGaps: (existing && existing.vantageGaps) || [],
       vantagePlans: (existing && existing.vantagePlans) || [],
     };
   }
   function loadCompanyFromServer(companyId) {
-    return apiV2("GET", "/companies/" + encodeURIComponent(companyId)).then(function (sc) {
+    // 2026-08-31: GET /companies/{id} now requires a session token (see
+    // persistence.py's _require_session) — it used to return a company's
+    // full confidential Decision Memory to anyone who knew or guessed its
+    // id, with zero credential of any kind. sessionToken is null before
+    // anyone has signed in (e.g. the unconditional pre-load on first page
+    // load below), which now simply 401s and is caught same as any other
+    // "backend unreachable" case -- the local seed stays in place until a
+    // real, authenticated snapshot is available.
+    var qs = sessionToken ? ("?token=" + encodeURIComponent(sessionToken)) : "";
+    return apiV2("GET", "/companies/" + encodeURIComponent(companyId) + qs).then(function (sc) {
       COMPANIES[companyId] = serverCompanyToLocal(sc);
       return COMPANIES[companyId];
     });
@@ -1497,6 +1553,11 @@
 
   /* ============ Session ============ */
   var session = { type: null }; // null | {type:'company', companyId, personaId, viaSupport} | {type:'platform'}
+  // The server-issued session token (persistence.py's _SESSIONS) that gates
+  // reading a company's full snapshot -- see loadCompanyFromServer above.
+  // Set on every successful /api/v2/login call and restored alongside the
+  // rest of the persisted session; cleared on logout.
+  var sessionToken = null;
   var ui = { loginError: "", wizard: null, editingMemberId: null, editingGoalId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, platformCompanies: null, boardOpenNodeId: null, boardQuery: "" };
 
   function currentCompany() {
@@ -1528,16 +1589,17 @@
   function persistSession() {
     try {
       if (session.type === "platform") {
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ type: "platform" }));
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ type: "platform", token: sessionToken }));
       } else if (session.type === "company" && !session.viaSupport) {
         localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
-          type: "company", companyId: session.companyId, personaId: session.personaId,
+          type: "company", companyId: session.companyId, personaId: session.personaId, token: sessionToken,
         }));
       }
     } catch (e) { /* localStorage unavailable (private browsing, etc.) — just don't persist */ }
   }
 
   function clearPersistedSession() {
+    sessionToken = null;
     try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
   }
 
@@ -1549,16 +1611,20 @@
     try { stored = JSON.parse(raw); } catch (e) { clearPersistedSession(); done(); return; }
 
     if (stored.type === "platform") {
+      if (!stored.token) { clearPersistedSession(); done(); return; } // pre-2026-08-31 stored session, no token -- can't re-authenticate it, fall back to sign-in
+      sessionToken = stored.token;
       session = { type: "platform" };
       done();
       return;
     }
     if (stored.type === "company" && stored.companyId && stored.personaId) {
-      fetch("/api/v2/companies/" + encodeURIComponent(stored.companyId))
+      if (!stored.token) { clearPersistedSession(); done(); return; } // same pre-token-fix fallback as above
+      fetch("/api/v2/companies/" + encodeURIComponent(stored.companyId) + "?token=" + encodeURIComponent(stored.token))
         .then(function (res) { if (!res.ok) throw new Error("stale company"); return res.json(); })
         .then(function (company) {
           if (!company.personas || !company.personas[stored.personaId]) throw new Error("stale persona");
           COMPANIES[stored.companyId] = serverCompanyToLocal(company);
+          sessionToken = stored.token;
           session = { type: "company", companyId: stored.companyId, personaId: stored.personaId };
           done();
         })
@@ -1664,13 +1730,21 @@
      render — so re-rendering the same screen doesn't spam duplicate entries. */
   function logAccessLedger(company, p, decisionId, decisionTitle, access, via) {
     if (!company.accessLedger) company.accessLedger = [];
-    company.accessLedger.unshift({
+    var entry = {
       id: "ledger-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
       ts: new Date().toISOString(),
       personaId: p.id, personaName: p.name, personaTitle: p.title,
       decisionId: decisionId, decisionTitle: decisionTitle, access: access, via: via,
-    });
+    };
+    company.accessLedger.unshift(entry);
     if (company.accessLedger.length > 500) company.accessLedger.length = 500;
+    // 2026-08-31: the Access Ledger is sold as an Enterprise "audit trail"
+    // feature -- it has to actually survive a reload/redeploy to be one.
+    // A single fire-and-forget POST per entry (rather than batching every
+    // call site into the /ledger/bulk endpoint) keeps every existing call
+    // site -- including the per-decision loop in logDecisionMemoryAccess
+    // below -- correct with one change here instead of four elsewhere.
+    persistFireAndForget(apiV2("POST", "/companies/" + company.id + "/ledger", entry));
   }
   function logDecisionMemoryAccess(company, p) {
     company.decisions.forEach(function (d) {
@@ -2403,9 +2477,14 @@
       if (!email || !password) { ui.loginError = "Enter both an email and a password."; renderShell(); return; }
 
       function loginLocally() {
+        // Staff sign-in has no client-side fallback — the server is the
+        // ONLY place that password is ever checked (see the note on
+        // STAFF_EMAIL above). If the backend is unreachable, staff simply
+        // can't sign in right now; that's the correct behavior, not a gap.
         if (email.trim().toLowerCase() === STAFF_EMAIL) {
-          if (password !== STAFF_PASSWORD) { ui.loginError = "Incorrect password for Cognex staff."; renderShell(); return; }
-          ui.loginError = ""; session = { type: "platform" }; persistSession(); renderShell(); return;
+          ui.loginError = "Can't reach the server to verify Cognex staff sign-in right now — try again shortly.";
+          renderShell();
+          return;
         }
         var found = findAccountByEmail(email);
         if (!found || password !== DEMO_PASSWORD) { ui.loginError = "No matching account, or the password's wrong. Demo password is " + DEMO_PASSWORD + " for every account."; renderShell(); return; }
@@ -2435,6 +2514,7 @@
         return res.json();
       }).then(function (result) {
         ui.loginError = "";
+        sessionToken = result.token || null;
         if (result.type === "platform") { session = { type: "platform" }; persistSession(); renderShell(); return; }
         COMPANIES[result.companyId] = serverCompanyToLocal(result.company);
         session = { type: "company", companyId: result.companyId, personaId: result.personaId };
@@ -2449,9 +2529,35 @@
     document.querySelectorAll("[data-quick]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         ui.loginError = "";
-        session = { type: "company", companyId: "cognex-labs", personaId: btn.getAttribute("data-quick") };
-        persistSession();
-        renderShell();
+        var personaId = btn.getAttribute("data-quick");
+        var p = demoCompany.personas[personaId];
+        function enterLocally() {
+          // Offline fallback only (no server reachable) -- no session token,
+          // so a later authenticated re-fetch of this company just 401s and
+          // keeps whatever local data is already in hand, same as any other
+          // "backend unreachable" degradation in this app.
+          session = { type: "company", companyId: "cognex-labs", personaId: personaId };
+          persistSession();
+          renderShell();
+        }
+        // 2026-08-31: quick-login used to set the session purely client-side
+        // with no server round trip at all, so it never got a session token
+        // -- now that GET /companies/{id} requires one, quick accounts sign
+        // in for real (same email + the intentionally-public demo password
+        // shown on this screen) so they get one like any other login.
+        if (!p || !p.email) { enterLocally(); return; }
+        fetch("/api/v2/login", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email: p.email, password: DEMO_PASSWORD }),
+        }).then(function (res) { if (!res.ok) throw new Error("quick login failed"); return res.json(); })
+          .then(function (result) {
+            sessionToken = result.token || null;
+            COMPANIES[result.companyId] = serverCompanyToLocal(result.company);
+            session = { type: "company", companyId: result.companyId, personaId: result.personaId };
+            persistSession();
+            renderShell();
+          })
+          .catch(enterLocally);
       });
     });
     document.getElementById("go-staff").addEventListener("click", openStaffLoginModal);
@@ -2497,15 +2603,16 @@
       if (!password) { ui.staffLoginError = "Enter the staff password."; renderStaffLoginModal(); return; }
 
       function signInLocally() {
-        if (password !== STAFF_PASSWORD) { ui.staffLoginError = "Incorrect password."; renderStaffLoginModal(); return; }
-        closeStaffLoginModal();
-        ui.loginError = ""; session = { type: "platform" }; persistSession(); renderShell();
+        // No client-side password check for staff sign-in — see the note by
+        // STAFF_EMAIL above. The server is unreachable, so this can only
+        // fail closed, not fall back to a locally-known secret.
+        ui.staffLoginError = "Can't reach the server to verify this right now — try again shortly.";
+        renderStaffLoginModal();
       }
 
-      // Same graceful-degradation pattern as the main login form: try the
-      // real backend first, and only fall back to the local check if the
-      // backend itself is unreachable. A 401 from a reachable server is
-      // authoritative.
+      // Unlike the main login form's fallback (which only ever checks the
+      // intentionally-public demo password), staff sign-in has nothing safe
+      // to fall back to locally, so the real backend is the only path.
       fetch("/api/v2/login", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: STAFF_EMAIL, password: password }),
@@ -2515,6 +2622,7 @@
         return res.json();
       }).then(function (result) {
         closeStaffLoginModal();
+        sessionToken = result.token || null;
         ui.loginError = ""; session = { type: "platform" }; persistSession(); renderShell();
       }).catch(function (err) {
         if (err && err.authoritative) { ui.staffLoginError = "Incorrect password."; renderStaffLoginModal(); return; }
@@ -2655,7 +2763,7 @@
         var c = COMPANIES[id];
         return { id: id, name: c.name, industry: c.industry, seeded: c.seeded, memberCount: Object.keys(c.personas).length, adminCount: countAdmins(c) };
       });
-      apiV2("GET", "/platform/companies").then(function (data) {
+      apiV2("GET", "/platform/companies?token=" + encodeURIComponent(sessionToken || "")).then(function (data) {
         ui.platformCompanies = data.companies;
         if (session.type === "platform") renderPlatform();
       }).catch(function () { /* offline — keep the local-only listing */ });
@@ -3161,8 +3269,26 @@
         goals: company.goals,
         message: q,
         history: history,
+        // 2026-08-31: lets the backend's per-company rate limit / monthly
+        // cost cap (live.py's _check_rate_limit/_check_cost_cap) key off
+        // the actual company instead of failing open for everyone. Field
+        // name matches AskRequest.company_id in live.py exactly (that
+        // model isn't camelCase-aliased, unlike the /api/v2 persistence
+        // models) -- a mismatch here would silently fail open again.
+        company_id: company.id,
       }),
     }).then(function (res) {
+      if (res.status === 429) {
+        // A real rejection from the rate limit or the monthly cost cap --
+        // NOT a "backend unreachable" failure. Must not fall through to
+        // fallbackToOffline(): the local rule-based engine would happily
+        // keep answering and silently defeat the whole point of the cap.
+        return res.json().catch(function () { return {}; }).then(function (e) {
+          var err = new Error(e.detail || "This company has hit its usage limit for now.");
+          err.isCapped = true;
+          throw err;
+        });
+      }
       if (!res.ok || !res.body) throw new Error("backend unavailable (" + res.status + ")");
       var sawAnyEvent = false;
       return readSSE(res, function (evt) {
@@ -3222,14 +3348,22 @@
       }).then(function () {
         if (!sawAnyEvent) throw new Error("stream closed with no data"); // e.g. a proxy that buffers/strips SSE
       });
-    }).catch(function () {
+    }).catch(function (err) {
+      if (!turn.pending) return; // "done" already landed via SSE before some later error — nothing to fall back on
+      if (err && err.isCapped) {
+        // Show the cap message as the answer itself, not an offline guess —
+        // an offline fallback here would make the cap invisible to the
+        // person hitting it.
+        turn.a = { text: renderRichText(err.message), raw: err.message, thinking: [], sources: [], files: [], live: false, capped: true };
+        finishTurn();
+        return;
+      }
       // Real backend/streaming unreachable, ANTHROPIC_API_KEY isn't set yet,
       // or the stream errored out server-side — fall back to the local
       // rule-based engine so the demo still works end to end. Flagged in
       // the UI, not silently swapped. If a partial answer had already
       // started streaming in, drop it rather than mixing a half-real,
       // half-offline answer together.
-      if (!turn.pending) return; // "done" already landed via SSE before some later error — nothing to fall back on
       fallbackToOffline();
     });
   }
@@ -3816,7 +3950,14 @@
     var company = currentCompany();
     if (!confirm("Disconnect Slack for " + company.name + "? Already-confirmed decisions stay in Decision Memory; the stored connection and any unreviewed candidates are removed.")) return;
     fetch("/api/integrations/slack/disconnect?company_id=" + encodeURIComponent(company.id), { method: "POST" })
-      .then(function () { ui.slackCandidates = null; ui.slackMsg = ""; slackRefreshStatus(); });
+      .then(function (res) {
+        if (!res.ok) throw new Error("disconnect failed (" + res.status + ")");
+        ui.slackCandidates = null; ui.slackMsg = ""; slackRefreshStatus();
+      })
+      // 2026-08-31: this was the one integration call in the file with no
+      // error handling at all -- a failed disconnect used to leave the UI
+      // showing nothing changed, no error, no way to tell it didn't work.
+      .catch(function () { showSyncError("Couldn't disconnect Slack — check your connection and try again."); });
   }
 
   function slackSync() {
@@ -4195,7 +4336,7 @@
     var recipient = company.personas[lf.recipientId];
     if (!company.handoffs) company.handoffs = [];
     var r = lf.report;
-    company.handoffs.unshift({
+    var record = {
       id: "handoff-" + company.id + "-" + p.id + "-" + Date.now(),
       fromPersonaId: p.id, fromName: p.name, fromTitle: p.title, fromDept: p.dept,
       toPersonaId: recipient.id, createdAt: new Date().toISOString(),
@@ -4203,7 +4344,11 @@
       delegationItems: (r.responsibilities || []).map(function (t) { return { text: t, kind: "Responsibility", assignedTo: null }; })
         .concat((r.incomplete_tasks || []).map(function (t) { return { text: t, kind: "Task", assignedTo: null }; })),
       status: "pending",
-    });
+    };
+    company.handoffs.unshift(record);
+    // 2026-08-31: Handoff Capture is a sold Business-tier feature -- persist
+    // it for real instead of only ever living in this tab's memory.
+    persistFireAndForget(apiV2("POST", "/companies/" + company.id + "/handoffs", record));
     ui.leaveFlow = { step: "sent", recipientName: recipient.name };
     renderShell();
   }
@@ -4327,7 +4472,10 @@
     if (!candidateId) return;
     var company = currentCompany();
     var h = (company.handoffs || []).filter(function (x) { return x.id === handoffId; })[0];
-    if (h) { h.delegationItems[index].assignedTo = candidateId; h.status = "delegating"; }
+    if (h) {
+      h.delegationItems[index].assignedTo = candidateId; h.status = "delegating";
+      persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/handoffs/" + encodeURIComponent(h.id), { status: h.status, delegationItems: h.delegationItems }));
+    }
     renderApp();
   }
   function finishHandoff(handoffId) {
@@ -4335,11 +4483,12 @@
     var h = (company.handoffs || []).filter(function (x) { return x.id === handoffId; })[0];
     if (!h) return;
     var departing = company.personas[h.fromPersonaId];
-    if (!departing) { h.status = "done"; renderApp(); return; }
+    if (!departing) { h.status = "done"; persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/handoffs/" + encodeURIComponent(h.id), { status: "done" })); renderApp(); return; }
     if (departing.isOrgAdmin && countAdmins(company) <= 1) { alert("Can't remove " + departing.name + " — they're the last remaining team admin. Promote someone else to team admin first."); return; }
     if (!confirm("Finish handoff and remove " + departing.name + " from " + company.name + "? This can't be undone.")) return;
     delete company.personas[h.fromPersonaId];
     h.status = "done";
+    persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/handoffs/" + encodeURIComponent(h.id), { status: "done" }));
     renderApp();
   }
   function renderHandoffs() {
