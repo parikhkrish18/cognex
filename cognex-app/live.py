@@ -483,6 +483,21 @@ they would make an answer better rather than defaulting to a prose guess:
   financial figures, names of people or deals) into a search query — search generically; if a
   question genuinely needs company-internal information, use your company-memory tools below
   instead of the web for that part.
+  CRITICAL when asked for a list of specific real-world entities — people, accounts/handles
+  (Instagram, TikTok, etc.), companies, contacts, or similar — that must actually exist and be
+  usable: search is not a database of those entities, and a general web index often can't verify
+  something as specific as "an Instagram account run by a jewelry-focused micro-influencer under
+  10k followers." If, after searching, you cannot confirm a specific name/handle/account is real
+  from what the search actually returned, do NOT invent a plausible-sounding one to fill the
+  list — a fabricated handle that doesn't exist is worse than no answer, because it looks
+  verified when it isn't. Instead: report what you genuinely found (even a shorter or partial
+  list), say plainly that general web search has limited coverage of a platform like Instagram
+  and can't reliably verify individual accounts, and suggest a better path for this specific kind
+  of request (e.g. searching directly within Instagram/the platform in question, a specialized
+  influencer-discovery tool, or hashtag/location browsing) rather than presenting invented
+  results as if they were real. This same rule applies to any other request for specific,
+  checkable real-world facts (a person's contact details, a real company's stated pricing, a
+  specific citation) — state what you verified, and flag plainly whatever you could not.
 - Web fetch: when you have (or the person gives you) a specific URL or a named site/domain — not
   just a general topic — fetch it directly instead of only searching for it. Search queries a
   search index and can come back empty for a small, new, or lightly-indexed site even though the
@@ -1095,6 +1110,7 @@ def consolidate_memory(candidates: list, new_content: dict) -> dict:
         candidates_block = "(the board is empty — this will be the first node)"
 
     context = (
+        f"The board currently has {len(candidates)} node(s).\n\n"
         f"Existing Decision Memory nodes (the company's current brain):\n{candidates_block}\n\n"
         "New information just captured:\n"
         f"Source: {new_content.get('source_kind', '')} (by {new_content.get('source_persona', '')} on {new_content.get('date', '')})\n"
@@ -1105,15 +1121,31 @@ def consolidate_memory(candidates: list, new_content: dict) -> dict:
         model=MODEL,
         max_tokens=768,
         system=(
-            "You maintain a company's collective knowledge board -- a small set of topic nodes, not a "
-            "growing pile of one-off notes. Decide whether the new information given is really about "
-            "the SAME topic as one of the existing nodes listed (merge into it, rewriting its summary "
-            "to reflect everything now known about that topic together) or is genuinely a new topic "
-            "(create a new node). Prefer merging when there's real topical overlap, even if the wording "
-            "is completely different -- judge by what the information is actually about, not shared "
-            "keywords. Only create a new node when the new information doesn't fit any existing node's "
-            "topic at all. The summary you write must read as one coherent paragraph describing the "
-            "current state of knowledge on this topic, not the newest fact bolted onto old text."
+            "You maintain a company's collective knowledge board -- a small set of BROAD topic nodes "
+            "(think of the handful of areas a new hire would need briefing on: the product/what the "
+            "company sells, go-to-market and customer acquisition, operations and supply chain, pricing "
+            "and unit economics, hiring and team, etc.) -- not a growing pile of narrow one-off notes, "
+            "and not one node per question someone happened to ask. Reported directly by the founder "
+            "(2026-08-31): earlier behavior left the board looking like a sprawling web of narrow, "
+            "single-fact nodes instead of a small set of nodes that actually show what the company "
+            "collectively knows -- your job is to prevent that.\n\n"
+            "Decide whether the new information belongs on one of the existing nodes listed (merge into "
+            "it, rewriting its summary to reflect everything now known about that broader area together) "
+            "or is genuinely a new area of knowledge with no real home yet (create a new node). Default "
+            "to merging: if the new information is a specific instance, example, or detail WITHIN a "
+            "broader area an existing node already covers (e.g. a specific outreach tactic belongs under "
+            "an existing 'customer acquisition' or 'marketing' node; a specific vendor risk belongs under "
+            "an existing 'operations'/'supply chain' node), merge into it and fold the new specifics into "
+            "the summary -- do not create a narrow new node just because the exact wording or sub-topic "
+            "wasn't covered before. Only create a new node when the information is about a genuinely "
+            "different area of the business that none of the existing nodes are really about at all. The "
+            "more nodes already exist, the harder you should lean toward merging rather than adding "
+            "another -- a board with a dozen or more nodes has almost certainly fragmented too far, and "
+            "you should actively look for the best-fit existing node to fold new information into rather "
+            "than defaulting to a fresh one. The summary you write must read as one coherent paragraph "
+            "describing the current state of knowledge on that broader topic, not the newest fact bolted "
+            "onto old text -- it should genuinely teach someone what the company now knows in this area, "
+            "not just log that something happened."
         ),
         tools=[CONSOLIDATE_MEMORY_SCHEMA],
         tool_choice={"type": "tool", "name": "submit_memory_consolidation"},

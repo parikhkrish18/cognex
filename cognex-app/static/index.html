@@ -46,6 +46,14 @@
   button { font-family: inherit; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   ::selection { background: var(--accent-soft); }
+  /* The default ::selection above is a very pale blue, tuned for dark text on
+     this app's light background — inside a dark-themed code block (near-black
+     bg, near-white text) that same pale color sits behind near-white text
+     with almost no contrast, making selected code read as washed-out/
+     illegible (reported directly, 2026-08-31: a code block screenshotted
+     mid-selection looked unreadable). Scoped override with a saturated,
+     darker highlight that stays legible against near-white monospace text. */
+  .code-block ::selection { background: rgba(10, 132, 255, 0.45); }
 
   .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
   @media (max-width: 640px) { .wrap { padding: 0 18px; } }
@@ -3198,6 +3206,20 @@
     }
     return positions;
   }
+  /* Added 2026-08-31 — direct founder feedback that the board "doesn't
+     clearly show what it knows": before this, a node was just an icon and a
+     truncated title, and seeing the actual content required clicking every
+     single node. This surfaces the same permission-filtered summary the
+     detail modal would show, as a native hover tooltip, so the board itself
+     communicates what's known at a glance for nodes you're allowed to see
+     anything about — and says plainly when a topic is restricted, rather
+     than silently showing nothing. */
+  function boardNodeTooltip(p, d, mode) {
+    if (mode === "none") return "🔒 Restricted — needs " + LEVEL_LABEL[d.visibility] + " clearance to view.";
+    var summary = d.derived || (mode === "source" && d.why && d.why[0]) || "";
+    if (!summary) return d.title + " — click to view.";
+    return summary.length > 220 ? summary.slice(0, 220) + "…" : summary;
+  }
   function boardNodeIcon(d) {
     if (d.viaStory) return "📝";
     if (d.viaSlack) return "💬";
@@ -3246,7 +3268,8 @@
       var matches = nodeMatchesBoardQuery(d, ui.boardQuery);
       var classes = "board-node" + (mode !== "source" ? " locked" : "") + (mode === "derived" ? " derived" : "") +
         ((mode === "source" && decisionNeedsReview(d)) ? " needs-review" : "") + (matches ? "" : " dimmed");
-      return '<div class="' + classes + '" style="left:' + pos.cx + '%;top:' + pos.cy + '%" data-node-id="' + esc(d.id) + '" tabindex="0">' +
+      var tip = boardNodeTooltip(p, d, mode);
+      return '<div class="' + classes + '" style="left:' + pos.cx + '%;top:' + pos.cy + '%" data-node-id="' + esc(d.id) + '" tabindex="0" title="' + esc(tip) + '">' +
         '<button class="board-node-del" data-del-node="' + esc(d.id) + '" title="Delete this topic" aria-label="Delete this topic">✕</button>' +
         '<div class="board-node-bubble">' + boardNodeIcon(d) + '</div>' +
         '<div class="board-node-title">' + esc(d.title.length > 40 ? d.title.slice(0, 40) + "…" : d.title) + "</div>" +
@@ -3291,7 +3314,18 @@
     var vantageTag = d.viaVantage ? '<span class="badge badge-type">Vantage</span>' : "";
     var reviewTag = (mode === "source" && decisionNeedsReview(d)) ? ' <span class="badge badge-review">Needs review</span>' : "";
     var body;
-    if (mode === "source") body = '<div class="board-detail-body">' + decisionSections(d) + "</div>";
+    if (mode === "source") {
+      // Added 2026-08-31 — direct founder feedback that a node "doesn't
+      // clearly show what it knows": this used to jump straight into the
+      // raw, ever-growing "Why" log (every save appends one more entry
+      // verbatim), so even someone with full access had to read the whole
+      // history to understand the topic. Lead with the consolidated
+      // summary (the same synthesized paragraph consolidate_memory writes
+      // to d.derived, and that a lower-clearance viewer already sees) —
+      // the raw log stays below it as full detail/provenance, not gone.
+      var summaryHtml = d.derived ? '<div class="dcard-sec"><h4>What we know</h4><div class="derived-notice">' + esc(d.derived) + "</div></div>" : "";
+      body = '<div class="board-detail-body">' + summaryHtml + decisionSections(d) + "</div>";
+    }
     else if (mode === "derived") body = '<div class="locked-notice">🔒 Raw decision record requires ' + LEVEL_LABEL[d.visibility] + ' clearance. You are seeing derived context only.</div><div class="derived-notice">' + esc(d.derived) + "</div>";
     else body = '<div class="locked-notice">🔒 This record and its derived context both require higher clearance than you currently have.</div>';
     var overlay = document.getElementById("board-detail-overlay");
