@@ -466,7 +466,13 @@ def _decisions_index(persona: Persona, decisions: list) -> str:
 
 
 def _system_prompt(persona: Persona, decisions: list) -> str:
-    return f"""You are Cognex, the AI assistant {persona.name} ({persona.title}, {persona.dept}
+    import datetime as _dt
+    today_str = _dt.datetime.now(_dt.timezone.utc).strftime("%A, %B %d, %Y")
+    return f"""Today's real date is {today_str}. Use this, not any date you might otherwise assume, for
+anything involving "today," "overdue," "how long ago," or similar — decision `review` dates and
+similar time-sensitive fields must be judged against this actual date, not a guess.
+
+You are Cognex, the AI assistant {persona.name} ({persona.title}, {persona.dept}
 department, clearance level {persona.level} of 6) uses for day-to-day company work — research,
 writing, coding, documentation, analysis, debugging, brainstorming, and anything else they'd
 otherwise reach for a general-purpose AI assistant to do. Answer those requests fully and

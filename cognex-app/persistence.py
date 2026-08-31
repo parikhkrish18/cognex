@@ -23,6 +23,7 @@ password check for real session/token verification shouldn't require
 touching the data model built here at all.
 """
 
+import secrets
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -44,6 +45,49 @@ STAFF_EMAIL = "admin@cognex.ai"
 # does show DEMO_PASSWORD on screen as an explicit "this demo isn't really
 # authenticated" disclosure.
 STAFF_PASSWORD = "Admin@Cognex"
+
+# ---------------------------------------------------------------------------
+# Minimal session tokens — added 2026-08-31 after a security audit flagged
+# that GET /companies/{company_id} (which returns EVERY decision's full
+# why/alternatives/risks and the whole roster, unfiltered) had no credential
+# requirement at all: anyone who knew or guessed a company_id could read a
+# client's full confidential Decision Memory with zero authentication,
+# directly contradicting the product's core "chain of command protection"
+# pitch. This is NOT real authentication — there's still one shared password
+# per company (DEMO_PASSWORD) and one for staff (STAFF_PASSWORD), so it
+# doesn't stop someone who has that shared password from reading anything;
+# closing that gap for real is the explicitly-scoped-separate "real auth"
+# phase (a third-party provider, per the founder's own prior direction).
+# What THIS closes is the zero-credential drive-by: a company's confidential
+# data can no longer be read by an unauthenticated request that never went
+# through /login at all. An in-memory dict is deliberately sufficient here
+# (matching this file's existing demo-scale conventions) — these tokens are
+# only ever meant to gate reads for the lifetime of one server process, the
+# same way the rest of this "illustrative, not real auth" system already
+# works; they are NOT a substitute for real session/token verification.
+_SESSIONS: dict = {}  # token -> {"kind": "company"|"platform", "company_id": str|None, "persona_id": str|None}
+
+
+def _issue_token(kind: str, company_id: Optional[str] = None, persona_id: Optional[str] = None) -> str:
+    token = secrets.token_urlsafe(32)
+    _SESSIONS[token] = {"kind": kind, "company_id": company_id, "persona_id": persona_id}
+    return token
+
+
+def _require_session(token: Optional[str], company_id: Optional[str] = None):
+    """Validates a session token for a read that should require SOME prior
+    login. A platform (staff) token is always accepted regardless of
+    company_id — staff legitimately need to read any company's data to
+    support it, mirroring the existing "Enter as support" flow. A company
+    token must match the specific company_id being read, so signing in to
+    one company never lets you read another's data by guessing its id."""
+    session = _SESSIONS.get(token) if token else None
+    if not session:
+        raise HTTPException(status_code=401, detail="Sign in required.")
+    if session["kind"] == "platform":
+        return
+    if company_id is not None and session.get("company_id") != company_id:
+        raise HTTPException(status_code=401, detail="This session isn't signed in to that company.")
 
 
 # ---------------------------------------------------------------------------
@@ -116,14 +160,18 @@ def _slugify(name: str) -> str:
 # Company snapshot + login + staff console listing
 # ---------------------------------------------------------------------------
 @router.get("/companies/{company_id}")
-def get_company(company_id: str):
+def get_company(company_id: str, token: Optional[str] = None):
+    _require_session(token, company_id=company_id)
     with get_session() as db:
         company = _get_company_or_404(db, company_id)
         return _company_snapshot(db, company)
 
 
 @router.get("/platform/companies")
-def list_companies():
+def list_companies(token: Optional[str] = None):
+    session = _SESSIONS.get(token) if token else None
+    if not session or session["kind"] != "platform":
+        raise HTTPException(status_code=401, detail="Cognex staff sign-in required.")
     with get_session() as db:
         companies = db.execute(select(Company)).scalars().all()
         rows = []
@@ -148,14 +196,15 @@ def login(req: LoginRequest):
     if email == STAFF_EMAIL:
         if req.password != STAFF_PASSWORD:
             raise HTTPException(status_code=401, detail="Incorrect password for Cognex staff.")
-        return {"type": "platform"}
+        return {"type": "platform", "token": _issue_token("platform")}
 
     with get_session() as db:
         persona = db.execute(select(Persona).where(Persona.email == email)).scalars().first()
         if not persona or req.password != DEMO_PASSWORD:
             raise HTTPException(status_code=401, detail="No matching account, or the password's wrong.")
         company = _get_company_or_404(db, persona.company_id)
-        return {"type": "company", "companyId": company.id, "personaId": persona.id, "company": _company_snapshot(db, company)}
+        token = _issue_token("company", company_id=company.id, persona_id=persona.id)
+        return {"type": "company", "companyId": company.id, "personaId": persona.id, "token": token, "company": _company_snapshot(db, company)}
 
 
 # ---------------------------------------------------------------------------
