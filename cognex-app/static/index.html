@@ -86,23 +86,9 @@
   .landing-hero-ctas { display: flex; align-items: center; justify-content: center; gap: 24px; margin: 30px 0 0; flex-wrap: wrap; }
   .landing-hero-secondary { font-size: 14px; font-weight: 500; color: var(--ink-soft); text-decoration: none; cursor: pointer; background: none; border: none; font-family: inherit; padding: 0; }
   .landing-hero-secondary:hover { color: var(--ink); }
-  .landing-proof { max-width: 900px; margin: 48px auto 0; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; text-align: left; }
-  .landing-proof-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 22px; background: var(--bg-soft); border-bottom: 1px solid var(--border-soft); flex-wrap: wrap; }
-  .landing-proof-head .q { font-size: 15.5px; font-weight: 500; color: var(--ink); }
   .landing-badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 590; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
-  .landing-badge-neutral { background: var(--surface-3); color: var(--ink-soft); }
   .landing-badge-source { background: var(--ink); color: #fff; }
   .landing-badge-derived { background: #fff; color: var(--ink); border: 1px solid var(--ink); }
-  .landing-proof-cols { display: grid; grid-template-columns: 1fr 1fr; }
-  @media (max-width: 680px) { .landing-proof-cols { grid-template-columns: 1fr; } }
-  .landing-proof-col { padding: 22px 24px; }
-  .landing-proof-col + .landing-proof-col { border-left: 1px solid var(--border-soft); }
-  @media (max-width: 680px) { .landing-proof-col + .landing-proof-col { border-left: none; border-top: 1px solid var(--border-soft); } }
-  .landing-proof-who { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-  .landing-proof-who .name { font-weight: 600; font-size: 14px; color: var(--ink); }
-  .landing-proof-who .title { font-size: 12.5px; color: var(--ink-faint); }
-  .landing-proof-answer { font-size: 14.5px; color: var(--ink); text-align: left; }
-  .landing-proof-answer.derived { color: var(--ink-soft); }
 
   /* Shared section scaffolding — Features / Benefits / Founders / Pricing */
   .landing-section { padding: 76px 0; border-top: 1px solid var(--border-soft); }
@@ -119,6 +105,28 @@
   .feature-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 17px; margin-bottom: 16px; }
   .feature-card h3 { font-size: 15.5px; margin-bottom: 8px; letter-spacing: -0.01em; }
   .feature-card p { font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; margin: 0; }
+
+  /* Org example (illustrative "familiar company" walkthrough) */
+  .org-example { max-width: 640px; margin: 0 auto; }
+  .org-card { border: 1px solid var(--border-soft); border-radius: 18px; padding: 24px 26px; background: var(--surface); }
+  .org-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .org-avatar { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 15px; flex: none; }
+  .org-name { font-weight: 600; font-size: 15px; }
+  .org-title { font-size: 12.5px; color: var(--ink-faint); }
+  .org-ask { font-size: 14px; color: var(--ink); margin-bottom: 12px; line-height: 1.5; }
+  .org-ask b { font-weight: 600; }
+  .org-ask span { font-style: italic; }
+  .org-answer { font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; }
+  .org-answer .landing-badge { margin-right: 8px; vertical-align: middle; }
+  .org-feature { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-soft); font-size: 11.5px; font-weight: 600; color: var(--accent-ink); text-transform: uppercase; letter-spacing: .02em; }
+  .org-arrow { text-align: center; font-size: 12px; color: var(--ink-faint); padding: 10px 0; }
+  .org-note { text-align: center; font-size: 13.5px; color: var(--ink-soft); margin: 28px auto 0; max-width: 560px; line-height: 1.55; }
+
+  /* Quote band */
+  .quote-band { background: var(--bg-soft); text-align: center; }
+  .landing-quote { font-size: clamp(21px, 2.8vw, 28px); font-weight: 500; letter-spacing: -0.01em; max-width: 680px; margin: 0 auto; line-height: 1.45; color: var(--ink); }
+  .landing-quote-attr { margin-top: 16px; font-size: 13px; color: var(--ink-faint); }
+  .landing-quote-note { margin: 22px auto 0; max-width: 520px; font-size: 14px; color: var(--ink-soft); line-height: 1.55; }
 
   /* Founders */
   .founders-story { max-width: 700px; margin: 0 auto 44px; text-align: center; font-size: 15px; color: var(--ink-soft); line-height: 1.65; }
@@ -630,7 +638,7 @@
     <div class="landing-mark">Cognex</div>
     <nav class="landing-nav-links">
       <a href="#features">What it does</a>
-      <a href="#founders">Founders</a>
+      <a href="#example">Example</a>
       <a href="#pricing">Pricing</a>
     </nav>
     <div class="landing-nav-ctas">
@@ -641,37 +649,12 @@
 
   <div class="landing-hero">
     <div class="wrap">
-      <div class="landing-eyebrow">The memory layer for your company</div>
-      <h1>One memory. A different answer for everyone who asks.</h1>
-      <p class="lede">Cognex stores your company's decisions and goals in one place, then answers questions from them — showing each person only what their role has earned. For companies of roughly 20–500 people, past the point where everyone still remembers everything.</p>
+      <div class="landing-eyebrow">For teams that have outgrown tribal knowledge</div>
+      <h1>Give your company a memory.</h1>
+      <p class="lede">Cognex is an AI assistant your team can use like any other — research, writing, questions, code. The difference: it holds your entire company's memory and context, decisions, goals, who reports to whom. So nothing your company has already figured out ever has to be re-explained, re-discovered, or lost when someone leaves.</p>
       <div class="landing-hero-ctas">
         <button class="landing-cta-btn landing-demo-cta">Book a demo</button>
         <a href="#features" class="landing-hero-secondary">See how it works ↓</a>
-      </div>
-
-      <div class="landing-proof">
-        <div class="landing-proof-head">
-          <span class="q">“Why is fulfillment planning changing for the UAE launch?”</span>
-          <span class="landing-badge landing-badge-neutral">Same question, same memory</span>
-        </div>
-        <div class="landing-proof-cols">
-          <div class="landing-proof-col">
-            <div class="landing-proof-who">
-              <div class="avatar sm" id="landing-proof-ceo-avatar"></div>
-              <div><div class="name" id="landing-proof-ceo-name"></div><div class="title" id="landing-proof-ceo-title"></div></div>
-              <span class="landing-badge landing-badge-source" style="margin-left:auto">Source access</span>
-            </div>
-            <div class="landing-proof-answer" id="landing-proof-ceo-answer"></div>
-          </div>
-          <div class="landing-proof-col">
-            <div class="landing-proof-who">
-              <div class="avatar sm" id="landing-proof-intern-avatar"></div>
-              <div><div class="name" id="landing-proof-intern-name"></div><div class="title" id="landing-proof-intern-title"></div></div>
-              <span class="landing-badge landing-badge-derived" style="margin-left:auto">Derived context</span>
-            </div>
-            <div class="landing-proof-answer derived" id="landing-proof-intern-answer"></div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -680,64 +663,90 @@
     <div class="wrap">
       <div class="landing-section-head">
         <div class="landing-section-eyebrow">What it does</div>
-        <h2>Six things, each solving one real problem</h2>
+        <h2>One memory. Everything that used to leak out of it, handled.</h2>
       </div>
       <div class="features-grid">
         <div class="feature-card">
           <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)">🗂</div>
-          <h3>Decision Memory</h3>
-          <p>Someone asks why you picked the UAE for launch. Instead of a buried Slack thread, they get the actual reasoning — what was decided, why, and what was ruled out.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:var(--green-soft);color:var(--green)">🎯</div>
-          <h3>Goal Alignment</h3>
-          <p>An engineer's sprint ticket traces up to the company goal it serves — “expand APAC revenue 40%” — so “why am I doing this” always has a real answer.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:var(--purple-soft);color:var(--purple)">💬</div>
-          <h3>Ask Cognex</h3>
-          <p>A chat assistant that reads your company's own Decision Memory and goals before it answers — and checks permissions before anything reaches it.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)">🔐</div>
-          <h3>Hierarchical access</h3>
-          <p>The CEO sees the acquisition numbers. Everyone else sees “we're expanding into a new market.” Same question, one memory, the right-sized answer.</p>
+          <h3>Notes and research, connected</h3>
+          <p>Meeting notes, research, and past decisions all live in one place — connected to your company's actual context, not scattered across docs nobody reopens.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon" style="background:#fff1e0;color:#b45c09">🔁</div>
-          <h3>Handoff Capture</h3>
-          <p>Someone resigns Friday. By Monday, their open decisions and context are captured and routed to whoever's next — not lost with them.</p>
+          <h3>Delegate without losing anything</h3>
+          <p>Handoffs capture the open threads and reasoning, not just the task — so responsibility actually transfers instead of half-arriving.</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon" style="background:var(--green-soft);color:var(--green)">🔗</div>
-          <h3>Slack-native capture</h3>
-          <p>Paste a decision straight from a Slack thread. Cognex proposes the structured record; a human approves it before it's saved.</p>
+          <div class="feature-icon" style="background:var(--purple-soft);color:var(--purple)">🧭</div>
+          <h3>An AI that finds the gaps</h3>
+          <p>Cognex scans your own goals and decisions, flags what's stalled or unowned, and drafts a next step — real strategy help, not just search.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)">🔐</div>
+          <h3>Chain of command, protected</h3>
+          <p>Every layer of the company gets the derived takeaway, never the raw record above their clearance. Structure stays intact as you grow.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:var(--green-soft);color:var(--green)">🎯</div>
+          <h3>Everyone's work ladders up</h3>
+          <p>Company goal → department → team → individual. “Why am I doing this” always traces back to real strategy — better organized, by default.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon" style="background:#f5e9fc;color:#7a2fb0">💬</div>
+          <h3>Ask Cognex anything</h3>
+          <p>A real AI assistant grounded in all of the above — permission-checked before anything reaches it, so the answer is always the right size.</p>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="landing-section" id="founders">
+  <div class="landing-section" id="example">
     <div class="wrap">
       <div class="landing-section-head">
-        <div class="landing-section-eyebrow">Who's building this</div>
-        <h2>Two childhood friends from Antwerp</h2>
+        <div class="landing-section-eyebrow">See it in a familiar org</div>
+        <h2>If an early Apple had one memory</h2>
+        <p>A hypothetical, not a customer story — using an org chart most people already know, to show what "the right context for every layer" looks like in practice.</p>
       </div>
-      <p class="founders-story">Shaan and Krish grew up together in Antwerp, now studying in different countries — Shaan finance at LSE, Krish engineering at Queen Mary. The same observation kept coming up: every company they looked at was quietly losing the reasoning behind its own decisions. Cognex is them fixing it.</p>
-      <div class="founders-grid">
-        <div class="founder-card">
-          <div class="founder-avatar" style="background:#e8f0fe;color:#0071e3">SD</div>
-          <h3>Shaan Diwan</h3>
-          <div class="founder-role">Co-founder &amp; CEO</div>
-          <p class="bio">Master's in Finance, London School of Economics. Leads strategy and go-to-market.</p>
+      <div class="org-example">
+        <div class="org-card">
+          <div class="org-card-head">
+            <div class="org-avatar" style="background:#1d1d1f;color:#fff">SJ</div>
+            <div><div class="org-name">Steve Jobs</div><div class="org-title">CEO</div></div>
+          </div>
+          <div class="org-ask">Asks Cognex: <span>“Why did we really kill the Newton spinoff?”</span></div>
+          <div class="org-answer"><span class="landing-badge landing-badge-source">Source access</span>The full debate, the cost case, and the call itself — the complete record, no clearance limits at the top.</div>
+          <div class="org-feature">🗂 Decision Memory</div>
         </div>
-        <div class="founder-card">
-          <div class="founder-avatar" style="background:#f5e9fc;color:#7a2fb0">KP</div>
-          <h3>Krish Parikh</h3>
-          <div class="founder-role">Co-founder &amp; CTO</div>
-          <p class="bio">Studying at Queen Mary University of London. Builds and ships Cognex end to end.</p>
+        <div class="org-arrow">↓ reports to</div>
+        <div class="org-card">
+          <div class="org-card-head">
+            <div class="org-avatar" style="background:#e8f0fe;color:#0071e3">SW</div>
+            <div><div class="org-name">Steve Wozniak</div><div class="org-title">Chief Engineer</div></div>
+          </div>
+          <div class="org-ask">Asks Cognex: <span>“What's actually blocking the next machine's ship date?”</span></div>
+          <div class="org-answer"><span class="landing-badge landing-badge-derived">Derived context</span>Every open engineering gap Cognex has flagged, each with a suggested next step — pulled straight from goals nobody's closed yet.</div>
+          <div class="org-feature">🧭 Gap-finding</div>
+        </div>
+        <div class="org-arrow">↓ reports to</div>
+        <div class="org-card">
+          <div class="org-card-head">
+            <div class="org-avatar" style="background:#f5e9fc;color:#7a2fb0">JD</div>
+            <div><div class="org-name">A new engineer</div><div class="org-title">Engineering</div></div>
+          </div>
+          <div class="org-ask">Asks Cognex: <span>“Why is my team building this instead of that?”</span></div>
+          <div class="org-answer"><span class="landing-badge landing-badge-derived">Derived context</span>The goal chain traced up to company strategy — without the confidential roadmap numbers above their clearance.</div>
+          <div class="org-feature">🎯 Goal Alignment</div>
         </div>
       </div>
+      <p class="org-note">Same memory, three correctly-scoped answers — and every handoff between these layers stays captured instead of walking out the door with whoever knew it.</p>
+    </div>
+  </div>
+
+  <div class="landing-section quote-band">
+    <div class="wrap">
+      <blockquote class="landing-quote">“We know more than we can tell.”</blockquote>
+      <div class="landing-quote-attr">— Michael Polanyi, <em>The Tacit Dimension</em> (1966)</div>
+      <p class="landing-quote-note">Most of what a company knows was never written down — it lives in whoever happened to be in the room. Cognex is where it gets told.</p>
     </div>
   </div>
 
@@ -795,11 +804,35 @@
 
   <div class="landing-final-cta">
     <div class="wrap">
-      <h2>Give your company a memory.</h2>
-      <p>See Cognex on your own org chart in 20 minutes.</p>
+      <h2>See it on your own org chart.</h2>
+      <p>20 minutes, no setup required to look.</p>
       <div class="landing-hero-ctas">
         <button class="landing-cta-btn landing-demo-cta">Book a demo</button>
         <button class="landing-hero-secondary landing-signin-cta">Already a customer? Sign in</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="landing-section" id="founders">
+    <div class="wrap">
+      <div class="landing-section-head">
+        <div class="landing-section-eyebrow">Who's building this</div>
+        <h2>Two childhood friends from Antwerp</h2>
+      </div>
+      <p class="founders-story">Shaan and Krish grew up together in Antwerp, now studying in different countries — Shaan finance at LSE, Krish engineering at Queen Mary. The same observation kept coming up: every company they looked at was quietly losing the reasoning behind its own decisions. Cognex is them fixing it.</p>
+      <div class="founders-grid">
+        <div class="founder-card">
+          <div class="founder-avatar" style="background:#e8f0fe;color:#0071e3">SD</div>
+          <h3>Shaan Diwan</h3>
+          <div class="founder-role">Co-founder &amp; CEO</div>
+          <p class="bio">Master's in Finance, London School of Economics. Leads strategy and go-to-market.</p>
+        </div>
+        <div class="founder-card">
+          <div class="founder-avatar" style="background:#f5e9fc;color:#7a2fb0">KP</div>
+          <h3>Krish Parikh</h3>
+          <div class="founder-role">Co-founder &amp; CTO</div>
+          <p class="bio">Studying at Queen Mary University of London. Builds and ships Cognex end to end.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -812,7 +845,7 @@
       </div>
       <div class="landing-footer-links">
         <a href="#features">What it does</a>
-        <a href="#founders">Founders</a>
+        <a href="#example">Example</a>
         <a href="#pricing">Pricing</a>
       </div>
     </div>
@@ -4266,28 +4299,6 @@
     });
   }
 
-  /* ============ Hero proof panel — always the seeded flagship example ============ */
-  function renderProof() {
-    var seed = COMPANIES["cognex-labs"];
-    var ceo = seed.personas.ceo, intern = seed.personas.intern;
-    var ceoA = acquisitionAnswer(seed, ceo);
-    var internA = acquisitionAnswer(seed, intern);
-
-    document.getElementById("landing-proof-ceo-avatar").style.background = ceo.bg;
-    document.getElementById("landing-proof-ceo-avatar").style.color = ceo.fg;
-    document.getElementById("landing-proof-ceo-avatar").textContent = ceo.initials;
-    document.getElementById("landing-proof-ceo-name").textContent = ceo.name;
-    document.getElementById("landing-proof-ceo-title").textContent = ceo.title;
-    document.getElementById("landing-proof-ceo-answer").innerHTML = ceoA.text;
-
-    document.getElementById("landing-proof-intern-avatar").style.background = intern.bg;
-    document.getElementById("landing-proof-intern-avatar").style.color = intern.fg;
-    document.getElementById("landing-proof-intern-avatar").textContent = intern.initials;
-    document.getElementById("landing-proof-intern-name").textContent = intern.name;
-    document.getElementById("landing-proof-intern-title").textContent = intern.title;
-    document.getElementById("landing-proof-intern-answer").innerHTML = internA.text;
-  }
-
   /* ============ "Book a demo" request modal (landing page) ============
      Not wired to any real inbox or CRM yet — there's no backend for it in
      this build. Submitting shows a genuine confirmation state so the flow
@@ -4389,7 +4400,6 @@
     renderDecisions(); // only rewrites #brain-board's own innerHTML, so this input keeps its value/focus
   });
 
-  renderProof();
   restoreSession(function () { renderShell(); });
 })();
 </script>
