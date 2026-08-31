@@ -97,6 +97,7 @@
   .landing-badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 590; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
   .landing-badge-source { background: var(--ink); color: #fff; }
   .landing-badge-derived { background: #fff; color: var(--ink); border: 1px solid var(--ink); }
+  .landing-badge-restricted { background: var(--red-soft); color: var(--red); }
 
   /* Shared section scaffolding — Features / Benefits / Founders / Pricing */
   .landing-section { padding: 76px 0; border-top: 1px solid var(--border-soft); }
@@ -109,14 +110,17 @@
   .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 1080px; margin: 0 auto; }
   @media (max-width: 900px) { .features-grid { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 620px) { .features-grid { grid-template-columns: 1fr; } }
-  .feature-card { border: 1px solid var(--border-soft); border-radius: 16px; padding: 24px 22px; background: var(--surface); }
-  .feature-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 17px; margin-bottom: 16px; }
+  .feature-card { border: 1px solid var(--border-soft); border-radius: 16px; padding: 24px 22px; background: var(--surface); transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease; }
+  .feature-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-md); border-color: var(--ink-faint); }
+  .feature-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 17px; margin-bottom: 16px; transition: transform .35s cubic-bezier(.34,1.56,.64,1); }
+  .feature-card:hover .feature-icon { transform: scale(1.12) rotate(-6deg); }
   .feature-card h3 { font-size: 15.5px; margin-bottom: 8px; letter-spacing: -0.01em; }
   .feature-card p { font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; margin: 0; }
 
   /* Org example (illustrative "familiar company" walkthrough) */
   .org-example { max-width: 640px; margin: 0 auto; }
-  .org-card { border: 1px solid var(--border-soft); border-radius: 18px; padding: 24px 26px; background: var(--surface); }
+  .org-card { border: 1px solid var(--border-soft); border-radius: 18px; padding: 24px 26px; background: var(--surface); transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease; }
+  .org-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); border-color: var(--ink-faint); }
   .org-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   .org-avatar { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 15px; flex: none; }
   .org-name { font-weight: 600; font-size: 15px; }
@@ -136,6 +140,47 @@
   .landing-quote-attr { margin-top: 16px; font-size: 13px; color: var(--ink-faint); }
   .landing-quote-note { margin: 22px auto 0; max-width: 520px; font-size: 14px; color: var(--ink-soft); line-height: 1.55; }
 
+  /* ============ Landing motion system (2026-08-31) ============
+     Scroll-triggered reveal + a few tasteful hover/idle animations,
+     all vanilla CSS/JS -- no animation library, matching the rest of
+     this app's zero-dependency frontend. */
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s cubic-bezier(.16,.84,.44,1), transform .7s cubic-bezier(.16,.84,.44,1); }
+  .reveal.is-visible { opacity: 1; transform: translateY(0); }
+  .reveal-2 { transition-delay: .1s; }
+  .reveal-3 { transition-delay: .2s; }
+  .reveal-4 { transition-delay: .3s; }
+  .reveal-stagger > * { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal-stagger.is-visible > * { opacity: 1; transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal, .reveal-stagger > * { transition: none; opacity: 1; transform: none; }
+  }
+
+  /* Hero: drifting gradient orbs behind the copy + a slow shimmer on the headline gradient */
+  .landing-hero { position: relative; overflow: hidden; }
+  .hero-orb { position: absolute; border-radius: 50%; filter: blur(60px); opacity: .35; pointer-events: none; z-index: 0; }
+  .hero-orb-1 { width: 360px; height: 360px; top: -140px; left: 8%; background: radial-gradient(circle, #ff9500, #ff2d92 70%); animation: orbDrift1 16s ease-in-out infinite; }
+  .hero-orb-2 { width: 300px; height: 300px; top: -80px; right: 6%; background: radial-gradient(circle, #007aff, #5856d6 70%); animation: orbDrift2 19s ease-in-out infinite; }
+  @keyframes orbDrift1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(30px,40px) scale(1.12); } }
+  @keyframes orbDrift2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-24px,30px) scale(1.08); } }
+  .landing-hero .wrap { position: relative; z-index: 1; }
+  .landing-hero h1 { background-size: 300% 100%; animation: heroGradientShift 9s ease infinite; }
+  @keyframes heroGradientShift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+  .landing-hero p.lede { font-weight: 500; }
+  @media (prefers-reduced-motion: reduce) { .hero-orb, .landing-hero h1 { animation: none; } }
+
+  /* "What Cognex actually is" toggle (own section, separate from the hero) */
+  .explainer-section { background: var(--bg-soft); }
+  .explainer-toggle { display: flex; justify-content: center; margin: 0 0 30px; }
+  .explainer-toggle-track { position: relative; display: inline-flex; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 999px; padding: 4px; }
+  .explainer-toggle-thumb { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); background: var(--ink); border-radius: 999px; transition: transform .35s cubic-bezier(.65,0,.35,1); z-index: 0; }
+  .explainer-toggle-thumb.is-right { transform: translateX(100%); }
+  .explainer-toggle-btn { position: relative; z-index: 1; flex: 0 0 auto; min-width: 150px; text-align: center; border: none; background: none; cursor: pointer; font-family: inherit; font-size: 13.5px; font-weight: 590; padding: 10px 18px; border-radius: 999px; color: var(--ink-soft); transition: color .35s ease; white-space: nowrap; }
+  .explainer-toggle-btn.is-active { color: #fff; }
+  .explainer-panels { position: relative; max-width: 620px; margin: 0 auto; text-align: center; min-height: 150px; }
+  .explainer-panel { position: absolute; left: 0; right: 0; top: 0; margin: 0; font-size: 17px; line-height: 1.6; color: var(--ink-soft); opacity: 0; transform: translateY(8px); transition: opacity .4s ease, transform .4s ease; pointer-events: none; }
+  .explainer-panel.is-active { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .explainer-panel b { color: var(--ink); font-weight: 600; }
+
   /* Founders */
   .founders-story { max-width: 700px; margin: 0 auto 44px; text-align: center; font-size: 15px; color: var(--ink-soft); line-height: 1.65; }
   .founders-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; max-width: 780px; margin: 0 auto; }
@@ -149,9 +194,12 @@
   /* Pricing */
   .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 1000px; margin: 0 auto; align-items: start; }
   @media (max-width: 820px) { .pricing-grid { grid-template-columns: 1fr; max-width: 420px; } }
-  .pricing-card { border: 1px solid var(--border-soft); border-radius: 18px; padding: 28px 24px; background: var(--surface); position: relative; }
+  .pricing-card { border: 1px solid var(--border-soft); border-radius: 18px; padding: 28px 24px; background: var(--surface); position: relative; transition: transform .25s ease, box-shadow .25s ease; }
+  .pricing-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-md); }
   .pricing-card.featured { border-color: var(--ink); box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-  .pricing-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
+  .pricing-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 999px; white-space: nowrap; animation: badgePulse 2.6s ease-in-out infinite; }
+  @keyframes badgePulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(29,29,31,0.28); } 50% { box-shadow: 0 0 0 6px rgba(29,29,31,0); } }
+  @media (prefers-reduced-motion: reduce) { .pricing-badge { animation: none; } }
   .pricing-name { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
   .pricing-price { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 2px; }
   .pricing-price span { font-size: 13px; font-weight: 500; color: var(--ink-faint); }
@@ -645,6 +693,7 @@
   <div class="wrap landing-topbar">
     <div class="landing-mark">Cognex</div>
     <nav class="landing-nav-links">
+      <a href="#explainer">Why Cognex</a>
       <a href="#features">What it does</a>
       <a href="#example">Example</a>
       <a href="#pricing">Pricing</a>
@@ -656,24 +705,46 @@
   </div>
 
   <div class="landing-hero">
+    <div class="hero-orb hero-orb-1"></div>
+    <div class="hero-orb hero-orb-2"></div>
     <div class="wrap">
-      <div class="landing-eyebrow">For teams that have outgrown tribal knowledge</div>
-      <h1>Give your company a memory.</h1>
-      <p class="lede">Cognex is an AI assistant your team can use like any other — research, writing, questions, code. The difference: it holds your entire company's memory and context, decisions, goals, who reports to whom. So nothing your company has already figured out ever has to be re-explained, re-discovered, or lost when someone leaves.</p>
-      <div class="landing-hero-ctas">
+      <div class="landing-eyebrow reveal">For teams that have outgrown tribal knowledge</div>
+      <h1 class="reveal reveal-2">Give your company a memory.</h1>
+      <p class="lede reveal reveal-3">The memory layer for your company.</p>
+      <div class="landing-hero-ctas reveal reveal-4">
         <button class="landing-cta-btn landing-demo-cta">Book a demo</button>
         <a href="#features" class="landing-hero-secondary">See how it works ↓</a>
       </div>
     </div>
   </div>
 
+  <div class="landing-section explainer-section" id="explainer">
+    <div class="wrap">
+      <div class="landing-section-head reveal">
+        <div class="landing-section-eyebrow">Why Cognex</div>
+        <h2>Not another AI. A memory for your company.</h2>
+      </div>
+      <div class="explainer-toggle reveal">
+        <div class="explainer-toggle-track">
+          <button class="explainer-toggle-btn" data-explain="without" role="tab" aria-selected="false">Any other AI</button>
+          <button class="explainer-toggle-btn is-active" data-explain="with" role="tab" aria-selected="true">Cognex</button>
+          <div class="explainer-toggle-thumb is-right" data-thumb></div>
+        </div>
+      </div>
+      <div class="explainer-panels reveal">
+        <p class="explainer-panel" data-panel="without">Ask it anything and it answers well. Then the chat ends — and it forgets your company ever existed. Tomorrow, someone re-explains the same context from scratch.</p>
+        <p class="explainer-panel is-active" data-panel="with">Cognex is an AI assistant your team can use like any other — <b>research, writing, questions, code</b>. The difference: it holds your entire company's memory. Every decision, every goal, who reports to whom. Nothing your team already figured out gets re-explained, re-discovered, or lost when someone leaves.</p>
+      </div>
+    </div>
+  </div>
+
   <div class="landing-section" id="features">
     <div class="wrap">
-      <div class="landing-section-head">
+      <div class="landing-section-head reveal">
         <div class="landing-section-eyebrow">What it does</div>
         <h2>One memory. Everything that used to leak out of it, handled.</h2>
       </div>
-      <div class="features-grid">
+      <div class="features-grid reveal-stagger">
         <div class="feature-card">
           <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)">🗂</div>
           <h3>Notes and research, connected</h3>
@@ -710,12 +781,12 @@
 
   <div class="landing-section" id="example">
     <div class="wrap">
-      <div class="landing-section-head">
+      <div class="landing-section-head reveal">
         <div class="landing-section-eyebrow">See it in a familiar org</div>
         <h2>If an early Apple had one memory</h2>
-        <p>A hypothetical, not a customer story — using an org chart most people already know, to show what "the right context for every layer" looks like in practice.</p>
+        <p>A hypothetical, not a customer story. Four familiar layers of the same company, each asking Cognex something ordinary — and each getting exactly the version of the truth their layer should get.</p>
       </div>
-      <div class="org-example">
+      <div class="org-example reveal-stagger">
         <div class="org-card">
           <div class="org-card-head">
             <div class="org-avatar" style="background:#1d1d1f;color:#fff">SJ</div>
@@ -725,33 +796,43 @@
           <div class="org-answer"><span class="landing-badge landing-badge-source">Source access</span>The full debate, the cost case, and the call itself — the complete record, no clearance limits at the top.</div>
           <div class="org-feature">🗂 Decision Memory</div>
         </div>
-        <div class="org-arrow">↓ reports to</div>
+        <div class="org-arrow">↓ one layer down</div>
         <div class="org-card">
           <div class="org-card-head">
             <div class="org-avatar" style="background:#e8f0fe;color:#0071e3">SW</div>
-            <div><div class="org-name">Steve Wozniak</div><div class="org-title">Chief Engineer</div></div>
+            <div><div class="org-name">Steve Wozniak</div><div class="org-title">Co-founder &amp; Chief Engineer</div></div>
           </div>
-          <div class="org-ask">Asks Cognex: <span>“What's actually blocking the next machine's ship date?”</span></div>
+          <div class="org-ask">Asks Cognex: <span>“What's actually blocking the next Apple II revision?”</span></div>
           <div class="org-answer"><span class="landing-badge landing-badge-derived">Derived context</span>Every open engineering gap Cognex has flagged, each with a suggested next step — pulled straight from goals nobody's closed yet.</div>
           <div class="org-feature">🧭 Gap-finding</div>
         </div>
-        <div class="org-arrow">↓ reports to</div>
+        <div class="org-arrow">↓ one layer down</div>
         <div class="org-card">
           <div class="org-card-head">
-            <div class="org-avatar" style="background:#f5e9fc;color:#7a2fb0">JD</div>
-            <div><div class="org-name">A new engineer</div><div class="org-title">Engineering</div></div>
+            <div class="org-avatar" style="background:var(--green-soft);color:var(--green)">PM</div>
+            <div><div class="org-name">A marketing lead</div><div class="org-title">Product Marketing</div></div>
           </div>
-          <div class="org-ask">Asks Cognex: <span>“Why is my team building this instead of that?”</span></div>
-          <div class="org-answer"><span class="landing-badge landing-badge-derived">Derived context</span>The goal chain traced up to company strategy — without the confidential roadmap numbers above their clearance.</div>
+          <div class="org-ask">Asks Cognex: <span>“Why did we price the original Macintosh at $2,495?”</span></div>
+          <div class="org-answer"><span class="landing-badge landing-badge-derived">Derived context</span>The reasoning that survives — cost target, positioning, what it needed to compete with — without the raw internal numbers above their clearance.</div>
           <div class="org-feature">🎯 Goal Alignment</div>
         </div>
+        <div class="org-arrow">↓ one layer down</div>
+        <div class="org-card">
+          <div class="org-card-head">
+            <div class="org-avatar" style="background:#f5e9fc;color:#7a2fb0">GB</div>
+            <div><div class="org-name">A Genius Bar employee</div><div class="org-title">Apple Store, Retail</div></div>
+          </div>
+          <div class="org-ask">Asks Cognex: <span>“Can I tell a customer what's coming in the next iPhone?”</span></div>
+          <div class="org-answer"><span class="landing-badge landing-badge-restricted">Restricted</span>Nothing about unreleased products — that's above this layer's clearance. Just what's already announced, worded the way Apple wants a customer to hear it.</div>
+          <div class="org-feature">🔐 Chain of command, protected</div>
+        </div>
       </div>
-      <p class="org-note">Same memory, three correctly-scoped answers — and every handoff between these layers stays captured instead of walking out the door with whoever knew it.</p>
+      <p class="org-note">Same memory, four correctly-scoped answers — the top gets the full record, everyone below gets exactly enough, and nothing said in confidence has to be re-explained by whoever happened to be in the room.</p>
     </div>
   </div>
 
   <div class="landing-section quote-band">
-    <div class="wrap">
+    <div class="wrap reveal">
       <blockquote class="landing-quote">“We know more than we can tell.”</blockquote>
       <div class="landing-quote-attr">— Michael Polanyi, <em>The Tacit Dimension</em> (1966)</div>
       <p class="landing-quote-note">Most of what a company knows was never written down — it lives in whoever happened to be in the room. Cognex is where it gets told.</p>
@@ -760,12 +841,12 @@
 
   <div class="landing-section" id="pricing">
     <div class="wrap">
-      <div class="landing-section-head">
+      <div class="landing-section-head reveal">
         <div class="landing-section-eyebrow">Pricing</div>
         <h2>Plans that grow with your team</h2>
         <p>Every plan includes Decision Memory, Goal Alignment, and Ask Cognex.</p>
       </div>
-      <div class="pricing-grid">
+      <div class="pricing-grid reveal-stagger">
         <div class="pricing-card">
           <div class="pricing-name">Starter</div>
           <div class="pricing-price">$19<span>/user/mo</span></div>
@@ -4433,6 +4514,50 @@
     ui.boardQuery = this.value;
     renderDecisions(); // only rewrites #brain-board's own innerHTML, so this input keeps its value/focus
   });
+
+  // "A regular AI assistant" vs. "Cognex" toggle in the new #explainer section
+  // (2026-08-31: the old hero paragraph moved into its own section and got a
+  // small interactive element, per direct founder feedback that it should be
+  // "fun interactive" and separate from the hero's now few-word subtitle).
+  var explainerTrack = document.querySelector(".explainer-toggle-track");
+  if (explainerTrack) {
+    explainerTrack.addEventListener("click", function (e) {
+      var btn = e.target.closest(".explainer-toggle-btn");
+      if (!btn) return;
+      var which = btn.getAttribute("data-explain");
+      document.querySelectorAll(".explainer-toggle-btn").forEach(function (b) {
+        var active = b === btn;
+        b.classList.toggle("is-active", active);
+        b.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      document.querySelectorAll(".explainer-panel").forEach(function (p) {
+        p.classList.toggle("is-active", p.getAttribute("data-panel") === which);
+      });
+      var thumb = explainerTrack.querySelector("[data-thumb]");
+      if (thumb) thumb.classList.toggle("is-right", which === "with");
+    });
+  }
+
+  // Scroll-triggered reveal for the landing page (.reveal / .reveal-stagger).
+  // Pure IntersectionObserver + CSS transitions -- no animation library, same
+  // no-dependency approach as the rest of this frontend.
+  function initLandingMotion() {
+    var targets = document.querySelectorAll(".reveal, .reveal-stagger");
+    if (!targets.length) return;
+    if (!("IntersectionObserver" in window)) {
+      targets.forEach(function (el) { el.classList.add("is-visible"); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("is-visible");
+        io.unobserve(entry.target);
+      });
+    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+    targets.forEach(function (el) { io.observe(el); });
+  }
+  initLandingMotion();
 
   restoreSession(function () { renderShell(); });
 })();
