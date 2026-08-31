@@ -23,17 +23,18 @@ password check for real session/token verification shouldn't require
 touching the data model built here at all.
 """
 
+import io
 import secrets
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from datetime import datetime, timezone
 
 from db_postgres import get_session
-from models import ChatThread, Company, CompanyUsage, Decision, Goal, Handoff, LedgerEntry, Persona
+from models import ChatThread, Company, CompanyUsage, Decision, Document, Goal, Handoff, LedgerEntry, Persona
 
 router = APIRouter(prefix="/api/v2")
 
@@ -745,3 +746,106 @@ def list_ledger(company_id: str):
             select(LedgerEntry).where(LedgerEntry.company_id == company_id).order_by(LedgerEntry.ts.desc()).limit(500)
         ).scalars().all()
         return {"entries": [_ledger_json(e) for e in rows]}
+
+
+# ---------------------------------------------------------------------------
+# Company Document Library — added 2026-08-31, direct founder feedback ("I
+# am not able to upload files"). The founder's own explicit choice on scope
+# (the biggest of three options offered): a real persistent, company-wide,
+# searchable library — uploaded once, referenceable across every future
+# chat — not a one-off per-message chat attachment. See Document's docstring
+# in models.py for the full reasoning behind its globally-unique id and why
+# file bytes live in Postgres rather than on local disk.
+#
+# Text extraction is intentionally narrow: txt/md/csv/json/log are read
+# directly as UTF-8 text, pdf/docx go through pypdf/python-docx (both added
+# to requirements.txt alongside this), and anything else is still stored and
+# downloadable but marked "not_indexed" rather than pretending to search
+# content that was never actually read. DOCUMENT_MAX_BYTES exists because
+# file bytes live in a Postgres column here, not a real object-storage tier
+# — there's no infrastructure behind this to make an unbounded per-file size
+# sane on a small Railway Postgres instance.
+# ---------------------------------------------------------------------------
+DOCUMENT_MAX_BYTES = 15 * 1024 * 1024  # 15 MB — see the module comment above
+DOCUMENT_TEXT_EXTS = ("txt", "md", "markdown", "csv", "json", "log")
+
+
+def _extract_document_text(filename: str, content: bytes) -> tuple[str, str]:
+    """Returns (text_content, extraction_status). Deliberately never raises
+    — a failure to extract text makes for a degraded-but-still-uploaded
+    document (stored and downloadable, just not searchable by content), not
+    a rejected upload; the person didn't do anything wrong by uploading a
+    file this code can't parse."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    try:
+        if ext in DOCUMENT_TEXT_EXTS:
+            return content.decode("utf-8", errors="replace"), "indexed"
+        if ext == "pdf":
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(content))
+            text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            return text, ("indexed" if text.strip() else "not_indexed")
+        if ext == "docx":
+            import docx
+            doc = docx.Document(io.BytesIO(content))
+            text = "\n".join(p.text for p in doc.paragraphs)
+            return text, ("indexed" if text.strip() else "not_indexed")
+    except Exception:
+        return "", "failed"
+    return "", "not_indexed"
+
+
+def _document_json(d: Document) -> dict:
+    # Deliberately never includes content_bytes or the full text_content —
+    # this is the shape used for the library list, which can hold many
+    # documents at once; the raw bytes are only ever served by live.py's
+    # GET /api/files/doc-{id} download route, and the extracted text is only
+    # ever read directly out of the DB by live.py's search_documents/
+    # get_document tools, never shipped to the browser in bulk.
+    return {
+        "id": d.id, "filename": d.filename, "mimeType": d.mime_type, "sizeBytes": d.size_bytes,
+        "uploadedBy": d.uploaded_by, "uploadedAt": d.uploaded_at, "extractionStatus": d.extraction_status,
+    }
+
+
+@router.post("/companies/{company_id}/documents")
+async def upload_document(company_id: str, file: UploadFile = File(...), uploadedBy: str = Form("")):
+    content = await file.read()
+    if len(content) > DOCUMENT_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"That file is too large — the document library caps uploads at {DOCUMENT_MAX_BYTES // (1024 * 1024)} MB.",
+        )
+    filename = file.filename or "upload"
+    with get_session() as db:
+        _get_company_or_404(db, company_id)
+        text_content, status = _extract_document_text(filename, content)
+        d = Document(
+            id="doc-" + secrets.token_urlsafe(16), company_id=company_id, filename=filename,
+            mime_type=file.content_type or "application/octet-stream", size_bytes=len(content),
+            uploaded_by=uploadedBy, uploaded_at=_now_iso(),
+            extraction_status=status, text_content=text_content, content_bytes=content,
+        )
+        db.add(d)
+        db.commit()
+        return _document_json(d)
+
+
+@router.get("/companies/{company_id}/documents")
+def list_documents(company_id: str):
+    with get_session() as db:
+        rows = db.execute(
+            select(Document).where(Document.company_id == company_id).order_by(Document.uploaded_at.desc())
+        ).scalars().all()
+        return {"documents": [_document_json(d) for d in rows]}
+
+
+@router.delete("/companies/{company_id}/documents/{document_id}")
+def delete_document(company_id: str, document_id: str):
+    with get_session() as db:
+        d = db.get(Document, document_id)
+        if not d or d.company_id != company_id:
+            return {"ok": True}  # already gone (or never belonged to this company) — deleting twice isn't an error
+        db.delete(d)
+        db.commit()
+        return {"ok": True}

@@ -41,6 +41,21 @@ from fastapi.responses import Response, StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel
 
+# Added 2026-08-31 for the company Document Library's search_documents/
+# get_document tools (and the "doc-" branch of GET /api/files/{file_id}
+# below) -- a deliberate, narrow departure from this module's otherwise
+# request-supplied-snapshot design (see the module docstring above). Every
+# other tool here operates purely on the decisions/goals this request's
+# body already carried; documents don't follow that pattern because a
+# company's uploaded files (extracted text included) can be large and
+# numerous enough that shipping them all in-line on every single /ask
+# request — the way decisions/goals already are — would be wasteful for
+# turns that never end up needing them. Scoped strictly to read-only
+# document lookups; nothing else in this file gains DB access through this.
+from db_postgres import get_session
+from models import Document
+from sqlalchemy import select
+
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 MAX_TOOL_ROUNDS = 8
 
@@ -421,11 +436,33 @@ TOOL_SCHEMAS = [
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "search_documents",
+        "description": (
+            "Search this company's uploaded document library (files people have added — contracts, "
+            "specs, reports, notes, etc.) by keyword, matching against filename and extracted text. "
+            "Every result is company-wide (this library has no per-document clearance model, unlike "
+            "Decision Memory) — call get_document to read a specific one's full extracted text once "
+            "you've found it here. A document with extraction_status 'not_indexed' or 'failed' can't "
+            "be searched by content this way (only by filename) — say so plainly rather than implying "
+            "you've read a file this tool couldn't actually extract text from."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Free-text search query, e.g. 'Q3 marketing budget'."}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_document",
+        "description": "Fetch a single uploaded document's full extracted text by id (from search_documents).",
+        "input_schema": {"type": "object", "properties": {"document_id": {"type": "string"}}, "required": ["document_id"]},
+    },
     GENERATE_IMAGE_SCHEMA,
 ]
 
 
-def _make_tool_impls(persona: Persona, decisions: list, goals: list):
+def _make_tool_impls(persona: Persona, decisions: list, goals: list, company_id: str = ""):
     def goal_by_id(goal_id):
         return next((g for g in goals if g.id == goal_id), None)
 
@@ -510,12 +547,56 @@ def _make_tool_impls(persona: Persona, decisions: list, goals: list):
             "individual_goal": ({"id": my_goal.id, "title": my_goal.title} if my_goal else None),
         }
 
+    def _document_summary(d) -> dict:
+        preview = (d.text_content or "")[:280]
+        return {
+            "id": d.id, "title": d.filename, "access": "source",
+            "extraction_status": d.extraction_status,
+            "preview": preview + ("…" if len(d.text_content or "") > 280 else ""),
+        }
+
+    def search_documents(query: str):
+        if not company_id:
+            return []
+        q_words = _tokenize(query)
+        with get_session() as db:
+            rows = db.execute(select(Document).where(Document.company_id == company_id)).scalars().all()
+        scored = []
+        for d in rows:
+            score = 0
+            for w in _tokenize(d.filename or ""):
+                if len(w) > 2 and w in q_words:
+                    score += 3
+            body_words = _tokenize(d.text_content or "")
+            score += sum(1 for w in q_words if len(w) > 3 and w in body_words)
+            if score > 0:
+                scored.append((score, d))
+        scored.sort(key=lambda pair: -pair[0])
+        return [_document_summary(d) for _, d in scored[:5]]
+
+    def get_document(document_id: str):
+        if not company_id:
+            return {"error": "No company context for this request."}
+        with get_session() as db:
+            d = db.get(Document, document_id)
+        if not d or d.company_id != company_id:
+            return {"error": f"No document with id '{document_id}' in this company's library."}
+        if d.extraction_status != "indexed":
+            return {
+                "id": d.id, "title": d.filename, "access": "source",
+                "extraction_status": d.extraction_status,
+                "note": f"This file's text could not be extracted (status: {d.extraction_status}) — you cannot read its contents, only confirm it exists and was uploaded.",
+            }
+        return {"id": d.id, "title": d.filename, "access": "source", "extraction_status": d.extraction_status, "text": d.text_content}
+
     return {
         "search_decisions": lambda tool_input: search_decisions(tool_input.get("query", "")),
         "get_decision": lambda tool_input: get_decision(tool_input.get("decision_id", "")),
         "search_goals": lambda tool_input: search_goals(tool_input.get("query", "")),
         "get_goal_chain": lambda tool_input: get_goal_chain(tool_input.get("goal_id", "")),
         "get_my_context": lambda tool_input: get_my_context(),
+        "search_documents": lambda tool_input: search_documents(tool_input.get("query", "")),
+        "get_document": lambda tool_input: get_document(tool_input.get("document_id", "")),
         "generate_image": lambda tool_input: generate_image(tool_input.get("prompt", ""), tool_input.get("size", "1024x1024")),
     }
 
@@ -615,6 +696,22 @@ they would make an answer better rather than defaulting to a prose guess:
   figure first, then use that real, sourced number for anything that follows (including any
   code_execution calculation). If search doesn't return a clear current figure, say so plainly and
   ask for the number rather than filling the gap with a memorized approximation.
+  CRITICAL for a business input the person hasn't told you and that isn't a fact you can look up
+  (a cost, budget, headcount, revenue figure, price, timeline, or any other number specific to
+  their situation): never silently invent a plausible-sounding value and compute with it as if it
+  were given. Reported directly by a user (2026-08-31): asked a question involving a business
+  calculation, never mentioned any cost figure, and the answer silently assumed a fixed cost of
+  $90,000 out of nowhere and calculated from it as if the person had said so. This is the same
+  failure as the exchange-rate case above — a confident number with no real source behind it — but
+  for a fact that has no "real" value to look up at all, since it lives only in the person's head
+  or their own records, not in web_search or training data. When a calculation needs a number like
+  this and the person hasn't given it, and it isn't already sitting in Decision Memory or Goals
+  (check first), do one of two things: ask them for it before calculating, or — if a
+  ballpark answer is still useful without stopping to ask — state the assumption plainly as an
+  assumption (e.g. "assuming $0 since no cost was given" or "assuming no fixed cost was mentioned,
+  so treating it as $0"), never as a fact, and make clear the real answer will change once they
+  supply the actual number. Do not default to $0 (or any other placeholder) silently — either ask,
+  or say out loud that you're assuming it.
 - Web fetch: when you have (or the person gives you) a specific URL or a named site/domain — not
   just a general topic — fetch it directly instead of only searching for it. Search queries a
   search index and can come back empty for a small, new, or lightly-indexed site even though the
@@ -647,6 +744,16 @@ only a derived summary is available, say so plainly instead of guessing at the f
 grounding requirement applies specifically to company-internal facts — it does not apply to
 general knowledge, web search results, coding help, or open research/computation, which you
 should answer using your own judgment and tools exactly as you normally would.
+
+You also have search_documents/get_document tools over this company's uploaded document library
+(contracts, specs, reports, notes — whatever people have added). Unlike Decision Memory, there's
+no live index of these injected into this prompt (the library can hold real files, not just short
+text, so it isn't cheap to summarize on every turn) — call search_documents whenever a question
+plausibly involves something someone would have uploaded rather than typed into a decision or
+goal (e.g. "what does the contract say about renewal terms", "summarize the Q3 report") before
+concluding the information doesn't exist. A document whose extraction_status isn't "indexed"
+couldn't be read by these tools at all (only its filename is known) — say so plainly rather than
+implying you've seen its contents.
 
 Here is an index of everything currently in this company's Decision Memory that you're allowed
 to see at all (title plus a short preview) — this is a live index, not a static list, so treat it
@@ -725,7 +832,7 @@ def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message:
     # actual cost incurred (see the `finally` block), regardless of which
     # caller invoked it.
     client = Anthropic()
-    impls = _make_tool_impls(persona, decisions, goals)
+    impls = _make_tool_impls(persona, decisions, goals, company_id)
     messages = list(history or [])
     messages.append({"role": "user", "content": user_message})
     tool_call_log = []
@@ -811,6 +918,8 @@ def _status_label_for(block_type: str, tool_name: str) -> str:
         "search_goals": "Searching company goals…",
         "get_goal_chain": "Tracing goal alignment…",
         "get_my_context": "Checking your role and context…",
+        "search_documents": "Searching company documents…",
+        "get_document": "Reading a document…",
         "generate_image": "Generating an image…",
     }.get(tool_name, "Thinking…")
 
@@ -840,7 +949,7 @@ def run_agent_turn_stream(persona: Persona, decisions: list, goals: list, user_m
     # a normal HTTPException mid-stream anyway (the 200 + SSE headers are
     # already committed). This function only RECORDS the cost incurred.
     client = Anthropic()
-    impls = _make_tool_impls(persona, decisions, goals)
+    impls = _make_tool_impls(persona, decisions, goals, company_id)
     messages = list(history or [])
     messages.append({"role": "user", "content": user_message})
     tool_call_log = []
@@ -1009,6 +1118,23 @@ def get_generated_file(file_id: str):
             content=rec["bytes"],
             media_type=rec["mime_type"] or "application/octet-stream",
             headers={"Content-Disposition": f'inline; filename="{rec["filename"] or file_id}"'},
+        )
+    if file_id.startswith("doc-"):
+        # A company document library upload (added 2026-08-31, see
+        # persistence.py's upload_document — Document ids are minted with
+        # this exact "doc-" prefix). Unlike img- above, this one real DB
+        # read is a deliberate, narrow departure from this module's
+        # otherwise-stateless "everything comes from the request body"
+        # design — see the search_documents/get_document tool comment below
+        # for the same reasoning.
+        with get_session() as db:
+            d = db.get(Document, file_id)
+        if not d:
+            raise HTTPException(status_code=404, detail=f"Document '{file_id}' was not found — it may have been deleted.")
+        return Response(
+            content=d.content_bytes,
+            media_type=d.mime_type or "application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{d.filename or file_id}"'},
         )
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")

@@ -30,7 +30,7 @@ real Postgres to verify this layer's logic.
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, ForeignKeyConstraint, Integer, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKeyConstraint, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -202,6 +202,62 @@ class CompanyUsage(Base):
     company_id: Mapped[str] = mapped_column(String, primary_key=True)
     period: Mapped[str] = mapped_column(String, primary_key=True)
     estimated_cost_cents: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (
+        ForeignKeyConstraint(["company_id"], ["companies.id"]),
+    )
+
+
+class Document(Base):
+    """A company's uploaded document library (added 2026-08-31, direct
+    founder feedback: "I am not able to upload files"). The founder's own
+    explicit choice on scope was the biggest of three options offered: a
+    real persistent, company-wide, searchable library -- uploaded once,
+    referenceable across every future chat -- not a one-off per-message
+    chat attachment.
+
+    Deliberately keyed by a single globally-unique `id`, NOT the
+    (company_id, id) composite key every other table in this file uses.
+    Downloads resolve through the existing global GET /api/files/{file_id}
+    route in live.py (extended with a "doc-" prefix branch) the exact same
+    way an OpenAI-generated image ("img-" prefix) or an Anthropic Files API
+    upload already does -- and that route has no company_id in its URL path
+    at all, so a document id has to be globally resolvable on its own.
+    `company_id` is still a plain filterable column here (not part of the
+    primary key) for listing/scoping a company's own library and for the
+    search_documents/get_document tools in live.py.
+
+    File bytes live in this table (`content_bytes`), not on local disk --
+    matching this whole app's one-Postgres-instance architecture, and
+    avoiding exactly the "gone on every Railway redeploy" gap the 2026-08-31
+    Handoff Capture / Access Ledger fix above closed for those two features:
+    Railway's filesystem isn't guaranteed to survive a redeploy, Postgres is.
+    There's a per-file size cap enforced in persistence.py's upload route
+    (a database column, not an object-storage tier, so this is deliberately
+    modest -- fine for the kind of reference docs a small company uploads,
+    not a general file-storage product).
+
+    `text_content` is the extracted plain text used for search_documents'
+    keyword matching (same approach as Decision.why -- a flat blob, not a
+    real search index). `extraction_status` is "indexed" (txt/md/csv read
+    directly, or pdf/docx text pulled via pypdf/python-docx), "not_indexed"
+    (a file type this app doesn't know how to extract text from -- still
+    stored and downloadable, just not searchable by content), or "failed"
+    (a recognized type whose extraction itself errored, e.g. a corrupt or
+    password-protected PDF)."""
+
+    __tablename__ = "documents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    company_id: Mapped[str] = mapped_column(String, index=True)
+    filename: Mapped[str] = mapped_column(String, default="")
+    mime_type: Mapped[str] = mapped_column(String, default="application/octet-stream")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    uploaded_by: Mapped[str] = mapped_column(String, default="")
+    uploaded_at: Mapped[str] = mapped_column(String, default="")
+    extraction_status: Mapped[str] = mapped_column(String, default="not_indexed")
+    text_content: Mapped[str] = mapped_column(Text, default="")
+    content_bytes: Mapped[bytes] = mapped_column(LargeBinary, default=b"")
 
     __table_args__ = (
         ForeignKeyConstraint(["company_id"], ["companies.id"]),

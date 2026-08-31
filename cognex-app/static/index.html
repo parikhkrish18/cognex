@@ -245,6 +245,9 @@
   .msg-save-btn { border: 1px solid var(--border); background: var(--surface); color: var(--ink-soft); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 500; cursor: pointer; }
   .msg-save-btn:hover { border-color: var(--accent); color: var(--accent-ink); }
   .msg-saved { font-size: 12px; color: var(--green); font-weight: 500; }
+  .msg-save-btn.is-excluded { color: var(--ink-faint); border-style: dashed; }
+  .msg-save-btn.is-excluded:hover { color: var(--ink-soft); border-color: var(--border); }
+  .msg-exclude-note { display: block; margin-top: 5px; font-size: 11px; color: var(--ink-faint); line-height: 1.4; }
 
   /* ============ Integrations (Admin tab) ============ */
   .integration-card { border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
@@ -314,9 +317,12 @@
   .nav-thread-row.active { background: var(--surface-3); color: var(--ink); }
   .nav-thread-row .tt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 7px 4px 7px 8px; font-size: 13px; font-weight: 500; }
   .nav-thread-row.active .tt { font-weight: 600; }
-  .nav-thread-del { opacity: 0; border: none; background: transparent; color: var(--ink-faint); font-size: 12px; cursor: pointer; padding: 4px 7px; border-radius: 6px; flex: none; }
-  .nav-thread-row:hover .nav-thread-del { opacity: 1; }
+  .nav-thread-del, .nav-thread-rename { opacity: 0; border: none; background: transparent; color: var(--ink-faint); font-size: 12px; cursor: pointer; padding: 4px 7px; border-radius: 6px; flex: none; }
+  .nav-thread-row:hover .nav-thread-del, .nav-thread-row:hover .nav-thread-rename { opacity: 1; }
   .nav-thread-del:hover { color: var(--red); background: var(--red-soft); }
+  .nav-thread-rename:hover { color: var(--ink); background: var(--surface-3); }
+  .nav-thread-row .tt-input { flex: 1; min-width: 0; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); background: var(--bg); border: 1px solid var(--accent); border-radius: 6px; padding: 5px 7px; margin: 1px 0 1px 5px; }
+  .nav-thread-row .tt-input:focus { outline: none; }
   .nav-workspace { display: flex; flex-direction: column; gap: 1px; padding: 0 8px; }
   .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: none; background: transparent; padding: 8px 8px; border-radius: 8px; cursor: pointer; color: var(--ink-soft); font-size: 13.5px; font-weight: 500; }
   .nav-item:hover { background: var(--surface-2); color: var(--ink); }
@@ -338,6 +344,8 @@
   .persona-list { list-style: none; margin: 0; padding: 8px; display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
   .persona-btn { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 9px; border-radius: 10px; border: none; background: transparent; cursor: pointer; color: var(--ink); }
   .persona-btn:hover { background: var(--surface-2); }
+  .persona-btn.readonly { cursor: default; }
+  .persona-btn.readonly:hover { background: transparent; }
   .persona-btn.active { background: var(--accent-soft); }
   .persona-btn.active .persona-meta .n { color: var(--accent-ink); }
   .persona-meta { min-width: 0; }
@@ -379,9 +387,10 @@
   .chip:hover { background: var(--surface-3); color: var(--ink); }
   .composer { display: flex; align-items: center; gap: 8px; margin-top: 14px; border: 1px solid var(--border); background: var(--bg); border-radius: 26px; padding: 6px 6px 6px 18px; }
   .composer:focus-within { border-color: var(--accent); }
-  .composer input { flex: 1; border: none; background: transparent; color: var(--ink); padding: 8px 0; font-size: 14.5px; font-family: inherit; }
-  .composer input:focus { outline: none; }
-  .composer input::placeholder { color: var(--ink-faint); }
+  .composer input, .composer textarea { flex: 1; border: none; background: transparent; color: var(--ink); padding: 8px 0; font-size: 14.5px; font-family: inherit; }
+  .composer textarea { resize: none; overflow-y: auto; max-height: 160px; line-height: 1.4; }
+  .composer input:focus, .composer textarea:focus { outline: none; }
+  .composer input::placeholder, .composer textarea::placeholder { color: var(--ink-faint); }
   .composer-send { flex: none; width: 34px; height: 34px; border-radius: 50%; border: none; background: var(--ink); color: #fff; font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
   .composer-send:hover { background: #3a3a3c; }
   .chat-log { display: flex; flex-direction: column; gap: 22px; }
@@ -433,6 +442,12 @@
   .msg-cognex .body .md-h4 { font-size: 14.5px; }
   .msg-cognex .body .md-h5 { font-size: 13.5px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .02em; }
   .msg-cognex .body .md-hr { border: none; border-top: 1px solid var(--border-soft); margin: 16px 0; }
+  .msg-cognex .body .md-table-wrap { margin: 4px 0 12px; overflow-x: auto; border: 1px solid var(--border-soft); border-radius: 10px; }
+  .msg-cognex .body .md-table-wrap:last-child { margin-bottom: 0; }
+  .msg-cognex .body .md-table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  .msg-cognex .body .md-table th, .msg-cognex .body .md-table td { padding: 7px 12px; border-bottom: 1px solid var(--border-soft); text-align: left; white-space: normal; }
+  .msg-cognex .body .md-table th { background: var(--bg-soft, rgba(0,0,0,0.03)); font-weight: 600; }
+  .msg-cognex .body .md-table tbody tr:last-child td { border-bottom: none; }
   /* Thinking / narration -- the "I'll search... let me check..." text Claude
      emits before a tool call, kept visually distinct from the actual final
      answer rather than run together with it (they used to be concatenated
@@ -666,6 +681,16 @@
   .handoff-item-text { flex: 1; min-width: 200px; }
   .handoff-item-row select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12.5px; font-family: inherit; background: var(--bg); }
   .suggest-hint { font-size: 11.5px; color: var(--ink-faint); width: 100%; margin-top: -2px; }
+  .form-error { font-size: 12.5px; color: var(--red); width: 100%; margin-top: 8px; }
+
+  /* ============ Company Document Library ============ */
+  .document-upload { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 18px 20px; border: 1px dashed var(--border); border-radius: 14px; margin-bottom: 20px; }
+  .document-list { display: flex; flex-direction: column; gap: 1px; }
+  .document-row { display: flex; align-items: center; gap: 12px; padding: 14px 4px; border-bottom: 1px solid var(--border-soft); flex-wrap: wrap; }
+  .document-row:last-child { border-bottom: none; }
+  .document-meta { flex: 1; min-width: 220px; }
+  .document-name { font-weight: 600; font-size: 14px; }
+  .document-sub { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
 
   /* ============ Vantage — strategist / gap-finder ============ */
   .vantage-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
@@ -1001,6 +1026,7 @@
         <button class="tab-btn nav-item" data-tab="story"><span class="ic">✍️</span> Complete the Story</button>
         <button class="tab-btn nav-item" data-tab="tree"><span class="ic">🌳</span> Company Tree</button>
         <button class="tab-btn nav-item" data-tab="vantage" id="vantage-tab-btn"><span class="ic">🧭</span> Vantage<span id="vantage-badge"></span></button>
+        <button class="tab-btn nav-item" data-tab="documents"><span class="ic">📄</span> Documents</button>
         <button class="tab-btn nav-item" data-tab="handoffs" id="handoffs-tab-btn" style="display:none"><span class="ic">🔁</span> Handoffs</button>
         <button class="tab-btn nav-item" data-tab="admin" id="admin-tab-btn" style="display:none"><span class="ic">⚙️</span> Admin</button>
       </div>
@@ -1060,7 +1086,7 @@
             <div class="composer-inner">
               <div class="chips" id="ask-chips"></div>
               <div class="composer">
-                <input type="text" id="ask-input" placeholder="Ask anything — try “why did we decide not to enter Germany?”" />
+                <textarea id="ask-input" rows="1" placeholder="Ask anything — try “why did we decide not to enter Germany?”"></textarea>
                 <button id="ask-send" class="composer-send" aria-label="Send">➤</button>
               </div>
             </div>
@@ -1092,6 +1118,16 @@
 
           <div class="panel panel-pad" id="tab-handoffs" style="display:none">
             <div id="handoffs-root"></div>
+          </div>
+
+          <div class="panel panel-pad" id="tab-documents" style="display:none">
+            <div class="board-toolbar">
+              <div>
+                <div class="board-title">Company Documents</div>
+                <div class="board-sub">Upload once — searchable from Ask Cognex across every future chat, not just this one.</div>
+              </div>
+            </div>
+            <div id="documents-root"></div>
           </div>
 
           <div class="panel panel-pad" id="tab-goals" style="display:none">
@@ -1558,7 +1594,7 @@
   // Set on every successful /api/v2/login call and restored alongside the
   // rest of the persisted session; cleared on logout.
   var sessionToken = null;
-  var ui = { loginError: "", wizard: null, editingMemberId: null, editingGoalId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, platformCompanies: null, boardOpenNodeId: null, boardQuery: "" };
+  var ui = { loginError: "", wizard: null, editingMemberId: null, editingGoalId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, platformCompanies: null, boardOpenNodeId: null, boardQuery: "", documentUploading: false, documentUploadError: "" };
 
   function currentCompany() {
     if (session.type === "company") return COMPANIES[session.companyId];
@@ -2279,7 +2315,7 @@
     return base;
   }
 
-  var state = { tab: "ask", chatByKey: {}, story: {} };
+  var state = { tab: "ask", chatByKey: {}, story: {}, documentsByCompany: {} };
 
   /* ============ Ask Cognex — multiple chat threads, like Claude/ChatGPT's chat
      history ============
@@ -2398,6 +2434,18 @@
     cs.activeId = id;
     state.tab = "ask";
     renderApp();
+  }
+  function renameThread(id, newTitle) {
+    var company = currentCompany(), p = currentPersona();
+    var cs = chatStateFor();
+    var t = cs.threads.filter(function (th) { return th.id === id; })[0];
+    if (!t) return;
+    var title = (newTitle || "").trim();
+    if (!title) title = "New chat";
+    if (title.length > 60) title = title.slice(0, 60) + "…";
+    t.title = title;
+    if (company && p) persistThread(company.id, p.id, t);
+    renderThreadList();
   }
   function deleteThread(id) {
     var company = currentCompany(), p = currentPersona();
@@ -2841,6 +2889,7 @@
     renderStory();
     renderTree();
     renderVantage();
+    renderDocuments();
     renderHandoffs();
     renderAdmin();
     renderLeaveModal();
@@ -2850,15 +2899,34 @@
     var company = currentCompany(), current = currentPersona();
     var list = document.getElementById("persona-list");
     list.innerHTML = "";
+    // Security fix (2026-08-31, direct founder report): this rail used to let
+    // ANY signed-in company user click any other roster member and instantly
+    // become them -- no confirmation, no auth check -- which meant reading
+    // that person's private chat threads (chatStateFor() keys by
+    // companyId::personaId) and acting with their permissions. The only
+    // legitimate reason to view the app "as" someone else is Cognex support
+    // previewing an account (session.viaSupport, entered from the platform
+    // console with its own explicit banner) -- that flow is untouched. For a
+    // real company session the roster is now read-only browsing; "everyone's
+    // contribution" is what Decision Memory / the Brain Board already exist
+    // to surface, not impersonation. (Switching who you're signed in as for
+    // a demo still works the way it always has -- log out and pick a
+    // different quick account on the sign-in screen; that's a real
+    // re-authentication step, not a single in-app click.)
+    var canSwitch = !!session.viaSupport;
     Object.keys(company.personas).forEach(function (id) {
       var p = company.personas[id];
       var li = document.createElement("li");
       var btn = document.createElement("button");
-      btn.className = "persona-btn" + (id === session.personaId ? " active" : "");
+      btn.className = "persona-btn" + (id === session.personaId ? " active" : "") + (canSwitch ? "" : " readonly");
       btn.innerHTML = '<div class="avatar sm" style="background:' + p.bg + ';color:' + p.fg + '">' + esc(p.initials) + "</div>" +
         '<div class="persona-meta"><div class="n">' + esc(p.name) + '</div><div class="t">' + esc(p.title) + "</div></div>" +
         '<div class="persona-tier">' + p.level + "</div>";
-      btn.addEventListener("click", function () { session.personaId = id; renderShell(); });
+      if (canSwitch) {
+        btn.addEventListener("click", function () { session.personaId = id; renderShell(); });
+      } else if (id !== session.personaId) {
+        btn.title = "Roster is view-only. Decision Memory captures everyone's contribution without needing to sign in as them.";
+      }
       li.appendChild(btn);
       list.appendChild(li);
     });
@@ -2877,18 +2945,73 @@
     cs.threads.forEach(function (t) {
       var row = document.createElement("div");
       row.className = "nav-thread-row" + (state.tab === "ask" && t.id === cs.activeId ? " active" : "");
+
+      function enterEditMode() {
+        var input = document.createElement("input");
+        input.className = "tt-input"; input.type = "text"; input.value = t.title;
+        input.maxLength = 60;
+        // "settled" (not just "is the input still attached") is the guard here:
+        // removing a focused input via renderThreadList()'s innerHTML reset
+        // fires this same input's blur event SYNCHRONOUSLY *before* the node
+        // is actually detached (verified directly -- parentNode is still set
+        // inside that blur handler), so an "am I still attached" check alone
+        // doesn't stop cancel()'s own re-render from re-triggering commit()
+        // through the blur it causes, clobbering the cancel with a save.
+        var settled = false;
+        function commit() {
+          if (settled) return;
+          settled = true;
+          renameThread(t.id, input.value);
+        }
+        function cancel() {
+          if (settled) return;
+          settled = true;
+          renderThreadList(); // just re-render with the unchanged title
+        }
+        input.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+        });
+        input.addEventListener("blur", commit);
+        input.addEventListener("click", function (e) { e.stopPropagation(); });
+        row.innerHTML = "";
+        row.appendChild(input);
+        input.focus(); input.select();
+      }
+
       var tt = document.createElement("span");
       tt.className = "tt"; tt.textContent = t.title;
+      tt.title = "Double-click to rename";
+      // Deliberately not a native "dblclick" listener: a plain click on tt
+      // also bubbles to the row's click handler below and switches threads,
+      // which calls renderApp() and rebuilds this whole list mid-gesture --
+      // by the time a real dblclick would fire, the element it'd fire on is
+      // already gone, so double-click-to-rename would silently never work.
+      // Detecting the double-click by hand (and stopping the single click
+      // from bubbling at all) avoids that re-render happening in between.
+      var ttClickTimer = null;
+      tt.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (ttClickTimer) {
+          clearTimeout(ttClickTimer); ttClickTimer = null;
+          enterEditMode();
+        } else {
+          ttClickTimer = setTimeout(function () { ttClickTimer = null; switchThread(t.id); }, 280);
+        }
+      });
+      var rename = document.createElement("button");
+      rename.className = "nav-thread-rename"; rename.title = "Rename chat"; rename.textContent = "✎";
+      rename.addEventListener("click", function (e) { e.stopPropagation(); enterEditMode(); });
       var del = document.createElement("button");
       del.className = "nav-thread-del"; del.title = "Delete chat"; del.textContent = "✕";
       del.addEventListener("click", function (e) { e.stopPropagation(); deleteThread(t.id); });
-      row.appendChild(tt); row.appendChild(del);
+      row.appendChild(tt); row.appendChild(rename); row.appendChild(del);
       row.addEventListener("click", function () { switchThread(t.id); });
       wrap.appendChild(row);
     });
   }
 
-  var TAB_IDS = ["ask", "decisions", "goals", "story", "tree", "vantage", "handoffs", "admin"];
+  var TAB_IDS = ["ask", "decisions", "goals", "story", "tree", "vantage", "documents", "handoffs", "admin"];
   function renderTabs() {
     var company = currentCompany(), p = currentPersona();
     var adminBtn = document.getElementById("admin-tab-btn");
@@ -2942,6 +3065,20 @@
     out = out.replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,!?]|$)/g, "$1<em>$2</em>");
     return out;
   }
+  // A GFM table separator row: "|---|---|", "---|:---:|---:", etc. -- one or
+  // more dash-runs (optionally colon-flanked for alignment) separated by
+  // pipes, with optional leading/trailing pipes. Must contain at least one
+  // dash so a lone "|" line or an empty row doesn't false-match.
+  function isTableSeparatorLine(line) {
+    return /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$/.test(line) && line.indexOf("-") !== -1;
+  }
+  function splitTableRow(line) {
+    var t = line.trim();
+    if (t.charAt(0) === "|") t = t.slice(1);
+    if (t.charAt(t.length - 1) === "|") t = t.slice(0, -1);
+    return t.split("|").map(function (c) { return c.trim(); });
+  }
+
   function renderRichText(raw) {
     if (!raw) return "";
     // Line-by-line block scanner rather than "split on blank lines, then
@@ -2999,6 +3136,36 @@
         flushPara();
         out.push('<hr class="md-hr">');
         i++; continue;
+      }
+
+      // GFM-style table: a "| a | b |" header row immediately followed by a
+      // "|---|---|" separator row. Previously these just fell through to the
+      // generic paragraph handler and rendered as literal pipes and dashes.
+      if (trimmed.indexOf("|") !== -1 && i + 1 < lines.length && isTableSeparatorLine(lines[i + 1].trim())) {
+        flushPara();
+        var headerCells = splitTableRow(trimmed);
+        var aligns = splitTableRow(lines[i + 1].trim()).map(function (c) {
+          var left = c.charAt(0) === ":", right = c.charAt(c.length - 1) === ":";
+          return left && right ? "center" : right ? "right" : left ? "left" : "";
+        });
+        i += 2;
+        var bodyRows = [];
+        while (i < lines.length && lines[i].trim() && lines[i].trim().indexOf("|") !== -1 && !isTableSeparatorLine(lines[i].trim())) {
+          bodyRows.push(splitTableRow(lines[i].trim()));
+          i++;
+        }
+        var thHtml = headerCells.map(function (c, ci) {
+          var style = aligns[ci] ? ' style="text-align:' + aligns[ci] + '"' : "";
+          return "<th" + style + ">" + inlineFormat(c) + "</th>";
+        }).join("");
+        var tbodyHtml = bodyRows.map(function (row) {
+          return "<tr>" + row.map(function (c, ci) {
+            var style = aligns[ci] ? ' style="text-align:' + aligns[ci] + '"' : "";
+            return "<td" + style + ">" + inlineFormat(c) + "</td>";
+          }).join("") + "</tr>";
+        }).join("");
+        out.push('<div class="md-table-wrap"><table class="md-table"><thead><tr>' + thHtml + "</tr></thead><tbody>" + tbodyHtml + "</tbody></table></div>");
+        continue;
       }
 
       if (/^[-*]\s+/.test(trimmed)) {
@@ -3076,14 +3243,27 @@
         : (turn.a.offline
           ? '<span class="badge badge-neutral" style="margin-left:auto">Offline demo mode</span>'
           : '<span class="badge badge-neutral" style="margin-left:auto">as ' + esc(p.name.split(" ")[0]) + " · " + LEVEL_LABEL[p.level] + "</span>");
-      // A quick way to turn any chat answer into a real Decision Memory entry —
-      // so running several parallel chat threads still feeds the same company
-      // brain instead of scattering useful context across throwaway chats.
-      var saveHtml = turn.savedToMemory
-        ? '<span class="msg-saved">✓ Saved to Decision Memory</span>'
-        : turn.savingToMemory
-        ? '<span class="msg-saved" style="color:var(--ink-faint)">Saving…</span>'
-        : '<button class="msg-save-btn" data-save-turn="' + idx + '">+ Save to Decision Memory</button>';
+      // Auto-saves to Decision Memory by default (2026-08-31, direct founder
+      // feedback) -- see autoSaveTurnToMemory. This button's job changes
+      // once that's happened: it becomes the opt-OUT ("Exclude from
+      // Decision Memory"), with a toggle back to re-include. A turn with no
+      // save state at all yet is a turn saved/loaded from before this
+      // feature existed -- it keeps the original manual "+ Save" button as
+      // a fallback rather than silently bulk-saving someone's whole
+      // pre-existing chat history the first time they open it.
+      var saveHtml;
+      if (turn.a.capped) {
+        saveHtml = ""; // a cap/rate-limit rejection message, not a real answer -- nothing to save
+      } else if (turn.savingToMemory) {
+        saveHtml = '<span class="msg-saved" style="color:var(--ink-faint)">Saving…</span>';
+      } else if (turn.excluded) {
+        saveHtml = '<button class="msg-save-btn is-excluded" data-include-turn="' + idx + '">Excluded — include again</button>' +
+          (turn.merged ? '<span class="msg-exclude-note">This had already been folded into a shared Decision Memory summary — excluding it removes its byline there, but can\'t un-merge the summary itself.</span>' : "");
+      } else if (turn.savedToMemory) {
+        saveHtml = '<button class="msg-save-btn" data-exclude-turn="' + idx + '">Exclude from Decision Memory</button>';
+      } else {
+        saveHtml = '<button class="msg-save-btn" data-save-turn="' + idx + '">+ Save to Decision Memory</button>';
+      }
       var outputHtml = (turn.a.files && turn.a.files.length)
         ? '<button class="msg-view-output-btn" data-view-output="' + idx + '">📎 View output (' + turn.a.files.length + ')</button>'
         : "";
@@ -3108,10 +3288,25 @@
     if (turn.a.raw) return turn.a.raw;
     return String(turn.a.text || "").replace(/<[^>]+>/g, "");
   }
-  function saveChatTurnToMemory(turnIndex) {
-    var company = currentCompany(), p = currentPersona();
-    var turn = chatFor()[turnIndex];
-    if (!turn || turn.pending || !turn.a || turn.savedToMemory || turn.savingToMemory) return;
+  /* ============ Chat-turn -> Decision Memory (auto-save + exclude) ============
+     Changed 2026-08-31 per direct founder feedback: "It should save decision
+     memory by default ... So you can choose to opt out but everything always
+     gets recorded by default." Every finished Ask Cognex turn now saves itself
+     automatically (see autoSaveTurnToMemory, called from finishTurn in
+     submitQuestion) through the exact same consolidateThenSave pipeline this
+     used to require a manual click for -- same auto-merge-or-new-node
+     behavior, same company-wide-by-default visibility, nothing about how a
+     turn gets folded into the Brain Board changed, only when it happens.
+     What used to be the "+ Save to Decision Memory" button is now, once a
+     turn has (already, automatically) been saved, an "Exclude from Decision
+     Memory" opt-out toggle -- see excludeTurnFromMemory/includeTurnInMemory
+     and the save-button state logic in renderChatLog. The founder's explicit
+     call on the one hard case here (a merge): keep auto-merging into the
+     Board's existing small set of broad-domain nodes, and make Exclude
+     best-effort rather than adding a whole separate "unmerged" data model --
+     see excludeTurnFromMemory's own comment for exactly what that does and
+     doesn't undo. */
+  function buildDecisionDraftFromTurn(company, p, turn) {
     var dateStr = new Date().toISOString().slice(0, 10);
     storyCounter += 1;
     var bodyText = plainTextOf(turn);
@@ -3121,12 +3316,12 @@
       decided: dateStr, owner: p.name + " · " + p.title,
       // Company-wide by default, not the saver's own clearance level.
       // Changed 2026-08-29 per the founder's explicit call: the whole point
-      // of "Save to Decision Memory" from an Ask Cognex chat is feeding
-      // shared company context (e.g. "what we sell") back into the same
-      // brain every other chat draws from -- defaulting to `p.level` meant
-      // that if the CEO (the highest clearance) saved something, only the
-      // CEO could ever see it again, which defeated the purpose for exactly
-      // the kind of foundational fact this feature exists to capture.
+      // of saving an Ask Cognex chat is feeding shared company context (e.g.
+      // "what we sell") back into the same brain every other chat draws
+      // from -- defaulting to `p.level` meant that if the CEO (the highest
+      // clearance) saved something, only the CEO could ever see it again,
+      // which defeated the purpose for exactly the kind of foundational
+      // fact this feature exists to capture.
       // Trade-off worth knowing: there's currently no UI (or backend field)
       // to dial an individual saved decision's visibility back down after
       // the fact -- update_decision() in persistence.py only supports
@@ -3142,14 +3337,118 @@
       derived: turn.q + " — context captured directly from " + p.name + "'s conversation with Cognex.",
       viaChat: true,
     };
+    return { newDecision: newDecision, bodyText: bodyText };
+  }
+  // Shared save core -- used by the very first save of a turn (whether
+  // triggered automatically from finishTurn or, for a turn from before this
+  // feature existed, the manual fallback button) AND by includeTurnInMemory
+  // when someone flips a previously-excluded turn back on. Records exactly
+  // which decision node this turn landed in (turn.decisionId) and whether
+  // that was a merge (turn.merged) plus the precise provenance line
+  // consolidateThenSave appended in the merge case (turn.mergedWhyLine) --
+  // excludeTurnFromMemory needs all three to do its best-effort undo later.
+  function saveTurnToMemory(company, p, turn, onDone) {
+    if (!turn || turn.pending || !turn.a || turn.a.capped || turn.savedToMemory || turn.savingToMemory || turn.excluded) {
+      if (onDone) onDone();
+      return;
+    }
+    var bodyText = plainTextOf(turn);
+    if (!bodyText || !bodyText.trim()) { if (onDone) onDone(); return; } // nothing worth capturing (e.g. an image-only answer)
+    var built = buildDecisionDraftFromTurn(company, p, turn);
     turn.savingToMemory = true;
-    renderChatLog();
-    consolidateThenSave(company, newDecision, "Ask Cognex", bodyText, function () {
+    consolidateThenSave(company, built.newDecision, "Ask Cognex", bodyText, function (savedDecision, merged) {
       turn.savingToMemory = false;
       turn.savedToMemory = true;
+      turn.decisionId = savedDecision.id;
+      turn.merged = !!merged;
+      turn.mergedWhyLine = merged
+        ? ("[" + built.newDecision.decided + " · " + (built.newDecision.owner || "unknown") + " via Ask Cognex] " + bodyText)
+        : null;
+      if (onDone) onDone();
+    });
+  }
+  // Called from finishTurn() for every turn that finishes, live or offline --
+  // "by default" per the founder's ask, not gated behind a click. Skipped
+  // only for a capped/error turn (saveTurnToMemory's own check) since that's
+  // not really an answer to capture, just a rejection message.
+  function autoSaveTurnToMemory(company, p, thread, turn) {
+    saveTurnToMemory(company, p, turn, function () {
+      persistThread(company.id, p.id, thread); // the first persistThread call in finishTurn ran before this async save resolved -- persist again now that decisionId/merged/mergedWhyLine are known, or a reload would show the turn as unsaved
+      if (state.tab === "ask" && activeThread() === thread) { renderChatLog(); renderDecisions(); }
+    });
+  }
+  // Manual fallback path -- only reachable today for a turn saved/loaded from
+  // before auto-save existed (no savedToMemory/savingToMemory/excluded flags
+  // at all yet), via the "+ Save to Decision Memory" button renderChatLog
+  // still shows for exactly that case.
+  function saveChatTurnToMemory(turnIndex) {
+    var company = currentCompany(), p = currentPersona();
+    var thread = activeThread();
+    var turn = thread.turns[turnIndex];
+    saveTurnToMemory(company, p, turn, function () {
+      persistThread(company.id, p.id, thread);
       renderChatLog();
       renderDecisions();
     });
+    renderChatLog(); // saveTurnToMemory sets turn.savingToMemory synchronously (the fetch inside consolidateThenSave is what's async) so this reflects "Saving…" immediately
+  }
+  // Best-effort opt-out (2026-08-31, founder's explicit choice on how this
+  // should interact with the Board's auto-merge behavior): a turn that's
+  // still its own standalone node gets deleted outright, cleanly. A turn
+  // that's already been folded into an existing shared node by the merge
+  // step is a harder case -- that node's `derived` summary was rewritten by
+  // Claude to reflect everything merged into it together, and there's no way
+  // to un-rewrite just this turn's contribution back out of already-combined
+  // prose. What IS undoable: the one exact provenance line this turn added
+  // to that node's `why[]` array (recorded verbatim as turn.mergedWhyLine at
+  // save time) -- removing it stops this turn from being cited as a source
+  // of that node going forward. Same class of accepted limitation as the
+  // Board's "merges are irreversible" gap; the UI says so plainly rather
+  // than implying a full retraction happened.
+  function excludeTurnFromMemory(turnIndex) {
+    var company = currentCompany(), p = currentPersona();
+    var thread = activeThread();
+    var turn = thread.turns[turnIndex];
+    if (!turn || !turn.savedToMemory || turn.excluded) return;
+    turn.excluded = true;
+    if (turn.merged && turn.decisionId) {
+      var existing = company.decisions.filter(function (d) { return d.id === turn.decisionId; })[0];
+      if (existing && turn.mergedWhyLine) {
+        var i = (existing.why || []).indexOf(turn.mergedWhyLine);
+        if (i !== -1) {
+          existing.why = existing.why.slice(0, i).concat(existing.why.slice(i + 1));
+          persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/decisions/" + encodeURIComponent(existing.id), { why: existing.why }));
+        }
+      }
+      // If the node's already gone, or someone else already edited its
+      // why[] since this turn was merged in, there's nothing left to
+      // retract -- the turn still ends up marked excluded either way.
+      renderDecisions();
+    } else if (turn.decisionId) {
+      company.decisions = company.decisions.filter(function (d) { return d.id !== turn.decisionId; });
+      persistFireAndForget(apiV2("DELETE", "/companies/" + company.id + "/decisions/" + encodeURIComponent(turn.decisionId)));
+      renderDecisions();
+    }
+    persistThread(company.id, p.id, thread);
+    renderChatLog();
+  }
+  function includeTurnInMemory(turnIndex) {
+    var company = currentCompany(), p = currentPersona();
+    var thread = activeThread();
+    var turn = thread.turns[turnIndex];
+    if (!turn || !turn.excluded) return;
+    // Re-including saves the turn fresh rather than trying to resurrect the
+    // exact prior node -- a standalone one may already be deleted, and a
+    // merged one's provenance line is gone -- so it goes back through the
+    // same auto-merge-or-new-node decision as any other save.
+    turn.excluded = false; turn.savedToMemory = false;
+    turn.decisionId = null; turn.merged = false; turn.mergedWhyLine = null;
+    saveTurnToMemory(company, p, turn, function () {
+      persistThread(company.id, p.id, thread);
+      renderChatLog();
+      renderDecisions();
+    });
+    renderChatLog(); // reflects "Saving…" immediately, same reasoning as saveChatTurnToMemory above
   }
   function badgeForAccess(access) {
     if (access === "source") return '<span class="badge badge-source">Source</span>';
@@ -3202,6 +3501,15 @@
     document.getElementById("output-panel").style.display = "none";
   }
 
+  // Ask Cognex composer is a <textarea> (was a single-line <input>) so Shift+Enter
+  // can insert a real newline while a plain Enter still submits. Auto-grows with
+  // content up to the CSS max-height (160px), then scrolls internally.
+  function resizeAskInput(el) {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 160) + "px";
+  }
+
   var askBusy = false; // one turn streams at a time — see setComposerBusy
   function setComposerBusy(busy) {
     askBusy = busy;
@@ -3242,6 +3550,14 @@
     function finishTurn() {
       turn.pending = false;
       setComposerBusy(false);
+      // Saves to Decision Memory by default now (2026-08-31, direct founder
+      // feedback) -- sets turn.savingToMemory synchronously (before the
+      // persistThread call right below, so that first persisted snapshot and
+      // the render right after both already reflect "Saving…"), then saves
+      // for real and persists a second time once that resolves. See
+      // autoSaveTurnToMemory's own comment for what does/doesn't get
+      // auto-saved.
+      autoSaveTurnToMemory(company, p, thread, turn);
       persistThread(company.id, p.id, thread);
       if (isThreadOnScreen()) {
         renderChatLog();
@@ -4491,6 +4807,129 @@
     persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/handoffs/" + encodeURIComponent(h.id), { status: "done" }));
     renderApp();
   }
+  /* ============ Company Document Library ============
+     Added 2026-08-31, direct founder feedback: "I am not able to upload
+     files." The founder's own explicit choice on scope (biggest of three
+     options offered): a real persistent, company-wide, searchable
+     library — uploaded once, referenceable from Ask Cognex across every
+     future chat — not a one-off per-message chat attachment. Backend:
+     persistence.py's /companies/{id}/documents routes (real Postgres
+     storage, see Document in models.py); search_documents/get_document
+     tools in live.py make it queryable from chat. This is the upload/list/
+     delete UI for it — a plain new sidebar tab, same pattern as Handoffs. */
+  function fmtBytes(n) {
+    if (!n && n !== 0) return "";
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / (1024 * 1024)).toFixed(1) + " MB";
+  }
+  function documentsStateFor() {
+    var company = currentCompany();
+    if (!company) return { items: [], loaded: false, loading: false };
+    if (!state.documentsByCompany[company.id]) state.documentsByCompany[company.id] = { items: [], loaded: false, loading: false };
+    var ds = state.documentsByCompany[company.id];
+    if (!ds.loaded && !ds.loading) {
+      ds.loading = true;
+      apiV2("GET", "/companies/" + encodeURIComponent(company.id) + "/documents").then(function (data) {
+        ds.items = data.documents || [];
+        ds.loaded = true; ds.loading = false;
+        // Only re-render if this is still the company on screen (matches
+        // loadThreadsFromServer's own guard) -- and re-render the whole
+        // documents panel even if the person has since navigated away from
+        // it, so it's not stuck showing "Loading…" the next time they come
+        // back (the tab-click handler above only covers "already loaded
+        // before you first visited"; this covers "still loading when you
+        // visited, then you left before it finished").
+        if (currentCompany() === company) renderDocuments();
+      }).catch(function () {
+        // Backend unreachable — same graceful-degradation pattern as
+        // everywhere else in this app; the library just stays empty until
+        // it's reachable, rather than blocking the rest of the UI.
+        ds.loaded = true; ds.loading = false;
+      });
+    }
+    return ds;
+  }
+  function uploadDocument() {
+    var company = currentCompany(), p = currentPersona();
+    var input = document.getElementById("document-file-input");
+    var file = input && input.files && input.files[0];
+    if (!file) { ui.documentUploadError = "Choose a file first."; renderDocuments(); return; }
+    ui.documentUploading = true; ui.documentUploadError = "";
+    renderDocuments();
+    var form = new FormData();
+    form.append("file", file);
+    form.append("uploadedBy", p.name + " · " + p.title);
+    // Deliberately not going through apiV2 (it always JSON-encodes the
+    // body) — a real multipart/form-data upload needs FormData with no
+    // explicit content-type header, so the browser can set the correct
+    // boundary itself.
+    fetch("/api/v2/companies/" + encodeURIComponent(company.id) + "/documents", { method: "POST", body: form })
+      .then(function (res) {
+        if (!res.ok) return res.json().catch(function () { return {}; }).then(function (e) { throw new Error(e.detail || ("upload failed (" + res.status + ")")); });
+        return res.json();
+      })
+      .then(function (doc) {
+        var ds = documentsStateFor();
+        ds.items.unshift(doc);
+        ui.documentUploading = false;
+        renderDocuments();
+      })
+      .catch(function (err) {
+        ui.documentUploading = false;
+        ui.documentUploadError = (err && err.message) || "Upload failed — check your connection and try again.";
+        renderDocuments();
+      });
+  }
+  function deleteDocument(id) {
+    var company = currentCompany();
+    var ds = documentsStateFor();
+    var d = ds.items.filter(function (x) { return x.id === id; })[0];
+    if (!d) return;
+    if (!confirm('Delete "' + d.filename + '" from the document library? This can\'t be undone.')) return;
+    ds.items = ds.items.filter(function (x) { return x.id !== id; });
+    renderDocuments();
+    persistFireAndForget(apiV2("DELETE", "/companies/" + company.id + "/documents/" + encodeURIComponent(id)));
+  }
+  function documentStatusBadge(status) {
+    if (status === "indexed") return '<span class="badge badge-source">Searchable in Ask Cognex</span>';
+    if (status === "failed") return '<span class="badge badge-neutral">Couldn\'t read text — downloadable only</span>';
+    return '<span class="badge badge-neutral">Not indexed — downloadable only</span>';
+  }
+  function renderDocuments() {
+    var root = document.getElementById("documents-root");
+    if (!root) return;
+    var ds = documentsStateFor();
+    var listHtml;
+    if (ds.loading && !ds.loaded) {
+      listHtml = '<div class="empty-state">Loading…</div>';
+    } else if (!ds.items.length) {
+      listHtml = '<div class="empty-state">No documents yet — upload one above to make it searchable from Ask Cognex.</div>';
+    } else {
+      listHtml = '<div class="document-list">' + ds.items.map(function (d) {
+        return '<div class="document-row">' +
+          '<div class="document-meta">' +
+            '<div class="document-name">' + esc(d.filename) + '</div>' +
+            '<div class="document-sub">' + esc(fmtBytes(d.sizeBytes)) + ' · uploaded by ' + esc(d.uploadedBy || "someone") + ' · ' + esc(d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString() : "") + '</div>' +
+          '</div>' +
+          documentStatusBadge(d.extractionStatus) +
+          '<a class="btn-secondary" href="/api/files/' + encodeURIComponent(d.id) + '" target="_blank" rel="noopener">Download</a>' +
+          '<button class="btn-secondary" data-delete-doc="' + esc(d.id) + '">Delete</button>' +
+        '</div>';
+      }).join("") + '</div>';
+    }
+    root.innerHTML =
+      '<div class="document-upload">' +
+        '<input type="file" id="document-file-input" />' +
+        '<button class="btn-primary" id="document-upload-btn"' + (ui.documentUploading ? " disabled" : "") + '>' + (ui.documentUploading ? "Uploading…" : "Upload") + '</button>' +
+        (ui.documentUploadError ? '<div class="form-error">' + esc(ui.documentUploadError) + '</div>' : "") +
+      '</div>' + listHtml;
+    var uploadBtn = document.getElementById("document-upload-btn");
+    if (uploadBtn) uploadBtn.addEventListener("click", uploadDocument);
+    document.querySelectorAll("[data-delete-doc]").forEach(function (btn) {
+      btn.addEventListener("click", function () { deleteDocument(btn.getAttribute("data-delete-doc")); });
+    });
+  }
   function renderHandoffs() {
     var company = currentCompany(), p = currentPersona();
     var root = document.getElementById("handoffs-root");
@@ -4620,6 +5059,10 @@
     }
     var saveBtn = e.target.closest("[data-save-turn]");
     if (saveBtn) { saveChatTurnToMemory(parseInt(saveBtn.getAttribute("data-save-turn"), 10)); return; }
+    var excludeBtn = e.target.closest("[data-exclude-turn]");
+    if (excludeBtn) { excludeTurnFromMemory(parseInt(excludeBtn.getAttribute("data-exclude-turn"), 10)); return; }
+    var includeBtn = e.target.closest("[data-include-turn]");
+    if (includeBtn) { includeTurnInMemory(parseInt(includeBtn.getAttribute("data-include-turn"), 10)); return; }
     var viewBtn = e.target.closest("[data-view-output]");
     if (viewBtn) { openOutputPanel(chatFor()[parseInt(viewBtn.getAttribute("data-view-output"), 10)]); return; }
   });
@@ -4634,17 +5077,23 @@
       var company = currentCompany(), p = currentPersona();
       if (company && p) logDecisionMemoryAccess(company, p);
     }
+    if (state.tab === "documents") renderDocuments(); // covers "data already loaded, this is just the first visit to this tab" -- documentsStateFor()'s own fetch callback covers the still-loading case
     renderTabs();
     renderThreadList();
   });
   document.getElementById("leave-company-btn").addEventListener("click", openLeaveFlow);
   document.getElementById("ask-send").addEventListener("click", function () {
     var input = document.getElementById("ask-input");
-    submitQuestion(input.value); input.value = "";
+    submitQuestion(input.value); input.value = ""; resizeAskInput(input);
   });
   document.getElementById("ask-input").addEventListener("keydown", function (e) {
-    if (e.key === "Enter") { submitQuestion(this.value); this.value = ""; }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      submitQuestion(this.value); this.value = ""; resizeAskInput(this);
+    }
+    // Shift+Enter: fall through to the browser's default textarea behavior (insert a newline).
   });
+  document.getElementById("ask-input").addEventListener("input", function () { resizeAskInput(this); });
   document.getElementById("app-logout").addEventListener("click", function () { session = { type: null }; ui.showLogin = false; clearPersistedSession(); renderShell(); });
   document.getElementById("exit-support").addEventListener("click", function () { session = { type: "platform" }; renderShell(); });
   document.querySelectorAll(".landing-signin-cta").forEach(function (btn) {
