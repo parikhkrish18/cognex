@@ -733,6 +733,8 @@
   .board-sub { font-size: 13px; color: var(--ink-faint); margin-top: 3px; max-width: 52ch; }
   .board-search { border: 1px solid var(--border); border-radius: 999px; padding: 8px 16px; font-size: 13px; font-family: inherit; width: 220px; flex: none; background: var(--surface); }
   .board-search::placeholder { color: var(--ink-faint); }
+  .board-toolbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .board-tidy-msg { font-size: 12.5px; color: var(--ink-faint); text-align: right; margin: -2px 0 10px; }
   /* A legend row for the ring's colors, per the dataviz skill's rule that
      identity is never carried by color alone -- each domain also has a
      text label here (and inside every node's own hover tooltip/detail
@@ -894,6 +896,16 @@
   .gcard-status { font-size: 11.5px; color: var(--ink-faint); margin-left: auto; }
   .gcard.resolved, .gcard.dismissed { opacity: 0.6; }
   .vantage-empty { text-align: center; padding: 48px 20px; color: var(--ink-faint); font-size: 13.5px; }
+  /* One-at-a-time review card (added 2026-09-02) -- freshly surfaced gaps
+     walk through here via vantageReviewExpand/vantageReviewSkip before
+     landing in the regular Open grid below, direct founder feedback: "it
+     should give random thoughts and the user can choose to start a chat
+     based on that thought... or choose to skip it and get the next gap." */
+  .vantage-review-card { border: 1px solid var(--accent-soft, var(--border)); background: var(--surface-2); border-radius: 18px; padding: 22px 24px; margin-bottom: 20px; }
+  .vantage-review-kicker { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent, var(--purple)); margin-bottom: 8px; }
+  .vantage-review-card h3 { font-size: 17px; letter-spacing: -0.01em; margin-bottom: 8px; }
+  .vantage-review-card p { font-size: 13.5px; color: var(--ink); line-height: 1.6; margin: 0 0 10px; }
+  .vantage-review-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
   .plans-grid { display: flex; flex-direction: column; gap: 10px; }
   .plan-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 14px; font-size: 13px; }
   .plan-row .pt { font-weight: 600; flex: 1; min-width: 200px; }
@@ -1211,7 +1223,7 @@
         <button class="tab-btn nav-item" data-tab="goals"><span class="ic">🎯</span> Goal Alignment</button>
         <button class="tab-btn nav-item" data-tab="story"><span class="ic">✍️</span> Complete the Story</button>
         <button class="tab-btn nav-item" data-tab="tree"><span class="ic">🌳</span> Company Tree</button>
-        <button class="tab-btn nav-item" data-tab="vantage" id="vantage-tab-btn"><span class="ic">🧭</span> Vantage<span id="vantage-badge"></span></button>
+        <button class="tab-btn nav-item" data-tab="vantage" id="vantage-tab-btn"><span class="ic">🧭</span> The Vantage Room<span id="vantage-badge"></span></button>
         <button class="tab-btn nav-item" data-tab="documents"><span class="ic">📄</span> Documents</button>
         <button class="tab-btn nav-item" data-tab="handoffs" id="handoffs-tab-btn" style="display:none"><span class="ic">🔁</span> Handoffs</button>
         <button class="tab-btn nav-item" data-tab="admin" id="admin-tab-btn" style="display:none"><span class="ic">⚙️</span> Admin</button>
@@ -1296,8 +1308,12 @@
                 <div class="board-title">Company Brain</div>
                 <div class="board-sub">Organized by department, growing sharper branches as each area gets more topics — not a growing list of individual saves.</div>
               </div>
-              <input type="search" id="board-search" class="board-search" placeholder="Filter topics…" />
+              <div class="board-toolbar-actions">
+                <input type="search" id="board-search" class="board-search" placeholder="Filter topics…" />
+                <button class="btn-secondary" id="board-tidy-btn" title="Have AI clean up messy titles and re-sort them into real departments">Tidy with AI</button>
+              </div>
             </div>
+            <div id="board-tidy-msg" class="board-tidy-msg" style="display:none"></div>
             <div id="board-legend-slot"></div>
             <div class="brain-board" id="brain-board"></div>
             <div class="modal-overlay" id="board-detail-overlay" style="display:none"></div>
@@ -1869,7 +1885,7 @@
   // Set on every successful /api/v2/login call and restored alongside the
   // rest of the persisted session; cleared on logout.
   var sessionToken = null;
-  var ui = { loginError: "", wizard: null, editingMemberId: null, editingGoalId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, platformCompanies: null, boardOpenNodeId: null, boardQuery: "", documentUploading: false, documentUploadError: "" };
+  var ui = { loginError: "", wizard: null, editingMemberId: null, editingGoalId: null, slackStatus: null, slackCandidates: null, slackBusy: false, slackMsg: "", showLogin: false, vantageBusy: false, vantageMsg: "", vantagePlanDraftFor: null, vantageReviewQueue: [], platformCompanies: null, boardOpenNodeId: null, boardQuery: "", documentUploading: false, documentUploadError: "" };
 
   function currentCompany() {
     if (session.type === "company") return COMPANIES[session.companyId];
@@ -1959,6 +1975,23 @@
         { field: "who", prompt: "Who else is involved in or sponsoring this work?" },
         { field: "why", prompt: "Why does this matter for " + (persona.dept || "the team") + " right now?" },
         { field: "risk", prompt: "What's the biggest risk if this doesn't get done on time?" },
+      ],
+    };
+  }
+  // Offline-fallback counterpart to generate_story_questions' new
+  // conversation-grounded behavior (see live.py, 2026-09-02): when the real
+  // backend is unreachable but this persona DOES have a real recent Ask
+  // Cognex thread, name it directly rather than falling back all the way to
+  // genericStoryFor's role-based template — still not as sharp as a real
+  // model reading the actual conversation for what's unresolved, but a lot
+  // closer than a generic "current priorities" prompt naming nothing real.
+  function genericStoryFromThread(persona, thread) {
+    return {
+      workItem: thread.title || (persona.title + " — recent conversation"),
+      questions: [
+        { field: "who", prompt: 'Who else needs to know about "' + thread.title + '"?' },
+        { field: "why", prompt: "What's the actual decision or next step that conversation was working toward?" },
+        { field: "risk", prompt: "Is there anything still unresolved from that conversation that could come back to bite you later?" },
       ],
     };
   }
@@ -2208,9 +2241,10 @@
     }).then(function (data) {
       var byId = {};
       (data.gaps || []).forEach(function (item) { byId[item.candidate_id] = item; });
+      var fresh = [];
       candidates.forEach(function (c) {
         var polished = byId[c.id];
-        company.vantageGaps.unshift({
+        var gap = {
           id: c.id, type: c.type,
           title: polished ? polished.title : c.title,
           description: polished ? polished.description : c.summary,
@@ -2218,19 +2252,36 @@
           severity: polished ? polished.severity : c.severity,
           visibility: c.visibility, relatedGoalIds: c.relatedGoalIds, relatedDecisionIds: c.relatedDecisionIds,
           status: "open", surfaced: new Date().toISOString().slice(0, 10), source: "live",
-        });
+          pendingReview: true,
+        };
+        company.vantageGaps.unshift(gap);
+        fresh.push(gap);
       });
+      // Direct founder feedback (2026-09-02): "it should give random
+      // thoughts and the user can choose to start a chat based on that
+      // thought... or choose to skip it and get the next gap." Freshly
+      // surfaced gaps land in this review queue (see renderVantage) and are
+      // walked one at a time via vantageReviewExpand/vantageReviewSkip below
+      // -- they're still stored in company.vantageGaps immediately (so
+      // nothing's lost if the tab closes mid-review), just excluded from the
+      // regular Open grid until pendingReview clears.
+      ui.vantageReviewQueue = fresh.concat(ui.vantageReviewQueue);
       ui.vantageBusy = false;
       renderVantage();
     }).catch(function () {
+      var fresh = [];
       candidates.forEach(function (c) {
-        company.vantageGaps.unshift({
+        var gap = {
           id: c.id, type: c.type, title: c.title, description: c.summary, recommendedNextStep: "",
           severity: c.severity, visibility: c.visibility,
           relatedGoalIds: c.relatedGoalIds, relatedDecisionIds: c.relatedDecisionIds,
           status: "open", surfaced: new Date().toISOString().slice(0, 10), source: "offline",
-        });
+          pendingReview: true,
+        };
+        company.vantageGaps.unshift(gap);
+        fresh.push(gap);
       });
+      ui.vantageReviewQueue = fresh.concat(ui.vantageReviewQueue);
       ui.vantageBusy = false;
       renderVantage();
     });
@@ -2286,11 +2337,11 @@
         title: plan.title,
         decided: dateStr, owner: plan.ownerName + (plan.ownerDept ? " · " + plan.ownerDept : ""),
         visibility: plan.visibility, derivedLevel: LEVEL.intern,
-        why: [plan.description || ("Raised by Vantage" + (gap ? (': "' + gap.title + '"') : "") + ".")],
+        why: [plan.description || ("Raised by The Vantage Room" + (gap ? (': "' + gap.title + '"') : "") + ".")],
         alternatives: [], assumptions: [], risks: [],
         review: "Not yet scheduled", result: plan.resolution || "Done",
         tags: tokenize(plan.title).slice(0, 6).concat([(plan.ownerDept || "").toLowerCase()]),
-        derived: plan.title + " — a plan raised through Vantage was completed.",
+        derived: plan.title + " — a plan raised through The Vantage Room was completed.",
         viaVantage: true,
       };
       var vantageBody = (plan.description || "") + (plan.resolution ? " Outcome: " + plan.resolution : "");
@@ -2311,10 +2362,10 @@
     var cs = chatStateFor();
     var t = newThreadObj();
     t.title = gap.title.length > 42 ? gap.title.slice(0, 42) + "…" : gap.title;
-    var seedText = "Here's what Vantage flagged:\n\n**" + gap.title + "**\n\n" + gap.description +
+    var seedText = "Here's what The Vantage Room flagged:\n\n**" + gap.title + "**\n\n" + gap.description +
       (gap.recommendedNextStep ? "\n\nSuggested next step: " + gap.recommendedNextStep : "");
     t.turns.push({
-      q: "Let's talk through this Vantage gap.",
+      q: "Let's talk through this idea from The Vantage Room.",
       a: { text: renderRichText(seedText), raw: seedText, sources: [], live: true, fromVantage: true },
       pending: false,
     });
@@ -2322,6 +2373,23 @@
     cs.activeId = t.id;
     state.tab = "ask";
     renderApp();
+  }
+
+  // One-at-a-time review flow for freshly surfaced gaps (see runVantageScan
+  // and renderVantage) — direct founder feedback (2026-09-02): "the user can
+  // choose to start a chat based on that thought ('Expand this idea in a new
+  // chat') or choose to skip it and get the next gap."
+  function vantageReviewExpand(gapId) {
+    ui.vantageReviewQueue = ui.vantageReviewQueue.filter(function (g) { return g.id !== gapId; });
+    var gap = (currentCompany().vantageGaps || []).filter(function (g) { return g.id === gapId; })[0];
+    if (gap) gap.pendingReview = false;
+    discussGapInChat(gapId); // switches to Ask Cognex with the idea seeded in, and calls renderApp() itself
+  }
+  function vantageReviewSkip(gapId) {
+    ui.vantageReviewQueue = ui.vantageReviewQueue.filter(function (g) { return g.id !== gapId; });
+    var gap = (currentCompany().vantageGaps || []).filter(function (g) { return g.id === gapId; })[0];
+    if (gap) gap.pendingReview = false; // stays visible in the Open grid, just no longer queued for one-at-a-time review
+    renderVantage();
   }
 
   var VANTAGE_TYPE_LABEL = {
@@ -2371,21 +2439,39 @@
       '<select data-plan-status="' + pl.id + '"' + (pl.status === "done" ? " disabled" : "") + ">" + statusOptions + "</select></div>";
   }
 
+  function vantageReviewCardHtml(g, queueLength) {
+    return '<div class="vantage-review-card">' +
+      '<div class="vantage-review-kicker">Company Strategy Head · idea 1 of ' + queueLength + '</div>' +
+      '<h3>' + esc(g.title) + '</h3>' +
+      '<p>' + esc(g.description) + '</p>' +
+      (g.recommendedNextStep ? '<div class="gcard-next"><b>Suggested next step:</b> ' + esc(g.recommendedNextStep) + '</div>' : '') +
+      '<div class="vantage-review-actions">' +
+      '<button class="btn-primary" data-expand-review="' + esc(g.id) + '">Expand this idea in a new chat</button>' +
+      '<button class="btn-secondary" data-skip-review="' + esc(g.id) + '">Skip — next idea</button>' +
+      '</div></div>';
+  }
+
   function renderVantage() {
     var company = currentCompany(), p = currentPersona();
     var root = document.getElementById("vantage-root");
     var allGaps = (company.vantageGaps || []).filter(function (g) { return gapVisible(p, g); });
-    var openGaps = allGaps.filter(function (g) { return g.status === "open"; });
+    // Freshly surfaced gaps (pendingReview) are walked one at a time via the
+    // review card below, not dumped straight into the Open grid — see
+    // runVantageScan / vantageReviewExpand / vantageReviewSkip.
+    var openGaps = allGaps.filter(function (g) { return g.status === "open" && !g.pendingReview; });
     var otherGaps = allGaps.filter(function (g) { return g.status !== "open"; });
     var plans = (company.vantagePlans || []).filter(function (pl) { return p.level >= pl.visibility; });
+    var reviewQueue = ui.vantageReviewQueue.filter(function (g) { return gapVisible(p, g); });
 
-    var html = '<div class="vantage-intro"><div><h2 style="margin-bottom:2px">Vantage</h2>' +
-      "<p>Cognex's own read of the company's decisions and goals — overdue reviews, goals nobody's assigned to, work that never got mapped to strategy, and decisions worth a second look. Talk through any of it, or turn it into a tracked plan.</p></div>" +
+    var html = '<div class="vantage-intro"><div><h2 style="margin-bottom:2px">The Vantage Room</h2>' +
+      "<p>Cognex's own read of the company's decisions and goals, from the seat of a Company Strategy Head — gaps worth attacking now, ideas worth expanding, and decisions worth a second look. Talk through any of it, or turn it into a tracked plan.</p></div>" +
       '<div style="text-align:right"><button class="btn-primary vantage-scan-btn" id="vantage-scan-btn"' + (ui.vantageBusy ? " disabled" : "") + ">" + (ui.vantageBusy ? "Scanning…" : "Run analysis") + "</button>" +
       (ui.vantageMsg ? '<div class="vantage-scan-meta">' + esc(ui.vantageMsg) + "</div>" : "") + "</div></div>";
 
-    if (!allGaps.length && !plans.length) {
-      html += '<div class="vantage-empty">Nothing surfaced yet. Click "Run analysis" to have Vantage scan current decisions and goals for gaps within your visibility.</div>';
+    if (reviewQueue.length) html += vantageReviewCardHtml(reviewQueue[0], reviewQueue.length);
+
+    if (!allGaps.length && !plans.length && !reviewQueue.length) {
+      html += '<div class="vantage-empty">Nothing surfaced yet. Click "Run analysis" to have The Vantage Room scan current decisions and goals for gaps to attack and ideas for expansion, within your visibility.</div>';
       root.innerHTML = html;
       wireVantageInteractions(company);
       return;
@@ -2402,6 +2488,12 @@
   function wireVantageInteractions(company) {
     var scanBtn = document.getElementById("vantage-scan-btn");
     if (scanBtn) scanBtn.addEventListener("click", runVantageScan);
+    document.querySelectorAll("[data-expand-review]").forEach(function (btn) {
+      btn.addEventListener("click", function () { vantageReviewExpand(btn.getAttribute("data-expand-review")); });
+    });
+    document.querySelectorAll("[data-skip-review]").forEach(function (btn) {
+      btn.addEventListener("click", function () { vantageReviewSkip(btn.getAttribute("data-skip-review")); });
+    });
     document.querySelectorAll("[data-discuss-gap]").forEach(function (btn) {
       btn.addEventListener("click", function () { discussGapInChat(btn.getAttribute("data-discuss-gap")); });
     });
@@ -3512,7 +3604,7 @@
         srcHtml = '<div class="sources"><div class="sources-label">Retrieved from company memory</div>' + turn.a.sources.map(function (s) { return '<div class="source-row">' + s.html + "</div>"; }).join("") + "</div>";
       }
       var modeBadge = turn.a.fromVantage
-        ? '<span class="badge badge-type" style="margin-left:auto">From Vantage</span>'
+        ? '<span class="badge badge-type" style="margin-left:auto">From The Vantage Room</span>'
         : turn.a.live
         ? '<span class="badge badge-source" style="margin-left:auto">Live · Claude</span>'
         : (turn.a.offline
@@ -4027,7 +4119,13 @@
   // "Go-to-market". Kept only so old data still reads the way it always
   // has; every NEW department is whatever readable name the AI assigned
   // (or a person typed), shown as-is.
-  var LEGACY_DOMAIN_LABELS = { product: "Product", gtm: "Go-to-market", ops: "Operations", pricing: "Pricing", hiring: "Hiring & team", other: "Other" };
+  // "other" -> "General": direct founder feedback (2026-09-02) on a board
+  // with exactly one department so far: "it is already named 'other'
+  // whereas it should have a name even if it is general as of now." Display
+  // only -- the underlying stored key stays the lowercase legacy "other" (or
+  // whatever DEFAULT_DOMAIN produces server-side, see live.py), this just
+  // stops it from reading as an unsorted leftover bucket.
+  var LEGACY_DOMAIN_LABELS = { product: "Product", gtm: "Go-to-market", ops: "Operations", pricing: "Pricing", hiring: "Hiring & team", other: "General" };
   function prettyDomainLabel(key) {
     var legacy = LEGACY_DOMAIN_LABELS[(key || "").toLowerCase()];
     if (legacy) return legacy;
@@ -4328,6 +4426,63 @@
     '<circle cx="12" cy="5.5" r="2.1"/><circle cx="5.5" cy="12" r="2.1"/><circle cx="18.5" cy="12" r="2.1"/><circle cx="8.5" cy="18.5" r="2.1"/><circle cx="15.5" cy="18.5" r="2.1"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>' +
     '<line x1="12" y1="7.2" x2="12" y2="10.7"/><line x1="7.2" y1="12.3" x2="10.5" y2="12"/><line x1="13.5" y1="12" x2="16.8" y2="12.3"/><line x1="10.6" y1="13.1" x2="9.1" y2="17"/><line x1="13.4" y1="13.1" x2="14.9" y2="17"/><line x1="10.4" y1="19.2" x2="13.6" y2="19.2"/>' +
     "</svg>";
+  // "Tidy with AI" — added 2026-09-02, direct founder feedback on the live
+  // board: node titles are often the exact prompt someone typed rather than
+  // a real topic name (see live.py's tidy_board_topics for why: everything
+  // captured while the server had no live model access, or before this
+  // classifier existed, kept its raw text forever with nothing to clean it
+  // up later). This sends every current TRUNK (branches/splits already got
+  // a real title from whatever consolidation created them) to /api/board/
+  // tidy and applies whatever comes back via the same PUT this board's
+  // review-outcome logging already uses — a retroactive one-time pass, not
+  // something that runs automatically, so a click is always required and
+  // its result is visible immediately.
+  function tidyBoard() {
+    var company = currentCompany();
+    var msgEl = document.getElementById("board-tidy-msg");
+    var btn = document.getElementById("board-tidy-btn");
+    var trunks = company.decisions.filter(function (d) { return !d.parentId; });
+    if (!trunks.length) {
+      msgEl.textContent = "Nothing to tidy yet.";
+      msgEl.style.display = "";
+      return;
+    }
+    btn.disabled = true; btn.textContent = "Tidying…";
+    msgEl.style.display = "none";
+    fetch("/api/board/tidy", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        topics: trunks.map(function (d) { return { id: d.id, title: d.title, domain: d.domain || "", why: d.why || [] }; }),
+      }),
+    }).then(function (res) {
+      if (!res.ok) throw new Error("backend unavailable (" + res.status + ")");
+      return res.json();
+    }).then(function (data) {
+      var byId = {};
+      (data.topics || []).forEach(function (t) { byId[t.id] = t; });
+      var changed = 0;
+      trunks.forEach(function (d) {
+        var t = byId[d.id];
+        if (!t) return;
+        var newTitle = (t.title || "").trim(), newDomain = (t.domain || "").trim();
+        var patch = {};
+        if (newTitle && newTitle !== d.title) { d.title = newTitle; patch.title = newTitle; }
+        if (newDomain && newDomain !== d.domain) { d.domain = newDomain; patch.domain = newDomain; }
+        if (Object.keys(patch).length) {
+          changed++;
+          persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/decisions/" + encodeURIComponent(d.id), patch));
+        }
+      });
+      btn.disabled = false; btn.textContent = "Tidy with AI";
+      msgEl.textContent = changed ? ("Cleaned up " + changed + " topic" + (changed === 1 ? "" : "s") + ".") : "Everything already looked clean.";
+      msgEl.style.display = "";
+      renderDecisions();
+    }).catch(function () {
+      btn.disabled = false; btn.textContent = "Tidy with AI";
+      msgEl.textContent = "Tidy needs the live AI connection — try again once that's back.";
+      msgEl.style.display = "";
+    });
+  }
   function nodeMatchesBoardQuery(d, q) {
     if (!q) return true;
     var words = tokenize(q);
@@ -4364,12 +4519,35 @@
     }
     var tree = layoutBoardTree(decisions, domainMetaList);
     var positions = tree.positions;
+    // Direct founder feedback on the live board (2026-09-02): "The strands
+    // of the tree seem very randomly placed as of now, they should all
+    // connect with lines." Before this, only a branch/split child drew a
+    // line (to its parent) -- a trunk connected to its department only
+    // implicitly by sitting near the ring, with no line at all. That reads
+    // fine when a trunk sits exactly on the ring (R0, see layoutBoardTree),
+    // but a crowded department pushes its extra trunks onto outer rings and
+    // the overlap resolver can nudge one further still -- with no line,
+    // THAT trunk visually reads as a random floating dot, not part of the
+    // tree, which is exactly the bug in the founder's screenshot. Every
+    // trunk now gets a radial connector back to its own point on the
+    // department ring: a trunk sitting right on the ring draws an
+    // essentially invisible zero-length line (no visual change there), and
+    // a pushed-out trunk draws a real visible spoke back to where it
+    // belongs.
+    var BOARD_RING_R = 27; // matches layoutBoardTree's own R0 / boardRingSvg's R
     var linesHtml = decisions.map(function (d) {
-      if (!d.parentId) return ""; // a trunk connects to its domain arc, not another node -- no line needed
-      var pos = positions[d.id], parentPos = positions[d.parentId];
-      if (!pos || !parentPos) return "";
+      var pos = positions[d.id];
+      if (!pos) return "";
       var color = domainMeta(d.domain || "Other").color;
-      return '<line data-line-for="' + esc(d.id) + '" data-line-domain="' + esc((d.domain || "Other").trim() || "Other") + '" x1="' + parentPos.cx + '" y1="' + parentPos.cy + '" x2="' + pos.cx + '" y2="' + pos.cy + '" style="stroke:' + color + '"></line>';
+      var domAttr = esc((d.domain || "Other").trim() || "Other");
+      if (!d.parentId) {
+        var angle = Math.atan2(pos.cy - 50, pos.cx - 50);
+        var rx = 50 + BOARD_RING_R * Math.cos(angle), ry = 50 + BOARD_RING_R * Math.sin(angle);
+        return '<line data-line-for="' + esc(d.id) + '" data-line-domain="' + domAttr + '" x1="' + rx + '" y1="' + ry + '" x2="' + pos.cx + '" y2="' + pos.cy + '" style="stroke:' + color + '"></line>';
+      }
+      var parentPos = positions[d.parentId];
+      if (!parentPos) return "";
+      return '<line data-line-for="' + esc(d.id) + '" data-line-domain="' + domAttr + '" x1="' + parentPos.cx + '" y1="' + parentPos.cy + '" x2="' + pos.cx + '" y2="' + pos.cy + '" style="stroke:' + color + '"></line>';
     }).join("");
     // Title length is trimmed harder than before, by depth: the title's
     // own CSS now hard-clamps to 2 lines (see .board-node-title), and a
@@ -4479,7 +4657,7 @@
     var storyTag = d.viaStory ? '<span class="badge badge-story">Complete the Story</span>' : "";
     var slackTag = d.viaSlack ? '<span class="badge badge-slack">Slack</span>' : "";
     var chatTag = d.viaChat ? '<span class="badge badge-chat">Ask Cognex</span>' : "";
-    var vantageTag = d.viaVantage ? '<span class="badge badge-type">Vantage</span>' : "";
+    var vantageTag = d.viaVantage ? '<span class="badge badge-type">The Vantage Room</span>' : "";
     var reviewTag = (mode === "source" && decisionNeedsReview(d)) ? ' <span class="badge badge-review">Needs review</span>' : "";
     var dm = domainMeta(d.domain || "Other");
     var domainTag = '<span class="badge" style="background:' + dm.color + '22;color:' + dm.color + '">' + esc(dm.label) + "</span>";
@@ -4738,16 +4916,54 @@
     // questions as an intern). Now it's a real Claude call, grounded in the
     // same goal/decision context the offboarding flow already uses, and it
     // can honestly say there's nothing to ask about.
-    if (!ss.saved && !ss.questionsLoaded && !ss.questionsLoading) {
+    // renderApp() calls renderStory() unconditionally on every interaction
+    // (badges/state, not just when this tab is actually open), so the very
+    // first check can and does happen before the person has said anything
+    // to Cognex yet this session -- correctly comes back "nothing to
+    // capture." Without the recheck below that answer would be cached for
+    // the rest of the session (questionsLoaded stays true), so a real
+    // conversation started AFTERWARD would never be picked up until a full
+    // reload -- exactly the kind of staleness direct founder feedback
+    // (2026-09-02) was really describing ("I have had quite a few convos...
+    // it should definitely have identified some parts"). So: once loaded
+    // with no work found, keep watching this persona's own thread count and
+    // allow exactly one re-check if it's grown since the last check.
+    var csPeek = state.chatByKey[sessionKey()];
+    var liveThreadCount = (csPeek && csPeek.loadedFromServer)
+      ? csPeek.threads.filter(function (t) { return t.turns && t.turns.length; }).length : (ss.checkedThreadCount || 0);
+    var shouldRecheck = ss.questionsLoaded && !ss.hasWork && liveThreadCount > (ss.checkedThreadCount || 0);
+    if (!ss.saved && !ss.questionsLoading && (!ss.questionsLoaded || shouldRecheck)) {
+      // Broadened 2026-09-02, direct founder feedback: "I have had quite a
+      // few convos with the model and it should definitely have identified
+      // some parts of my convos that require more clarification." This used
+      // to look ONLY at a formal individual goal or a Decision Memory entry
+      // with this person as `contributor` — someone who mostly just talks
+      // to Cognex rather than filing goals/decisions under their own name
+      // had zero signal, no matter how many real conversations they'd had.
+      // chatStateFor() lazily loads this persona's real threads from the
+      // server (see loadThreadsFromServer) and re-renders via renderApp()
+      // when that lands — wait for that first load so the very first
+      // render of this tab doesn't fire the request without them.
+      var cs = chatStateFor();
+      if (!cs.loadedFromServer) {
+        root.innerHTML = '<div class="empty-decisions">Checking whether there\'s something real to ask you about…</div>';
+        return;
+      }
       ss.questionsLoading = true;
       var myGoal = individualGoalFor(company, p);
       var myDecisions = company.decisions.filter(function (d) { return d.contributor && d.contributor.indexOf(p.name) !== -1; });
+      var myThreads = cs.threads.filter(function (t) { return t.turns && t.turns.length; });
+      ss.checkedThreadCount = myThreads.length;
+      var recentThreads = myThreads.slice(0, 6).map(function (t) {
+        return { title: t.title, messages: t.turns.map(function (turn) { return turn.q; }).filter(Boolean).slice(0, 8) };
+      });
       fetch("/api/complete-story/questions", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({
           persona: { id: p.id, name: p.name, title: p.title, level: p.level, dept: p.dept },
           individual_goal: myGoal || null,
           recent_decisions: myDecisions,
+          recent_threads: recentThreads,
         }),
       }).then(function (res) { if (!res.ok) throw new Error("backend unavailable (" + res.status + ")"); return res.json(); })
         .then(function (data) {
@@ -4758,14 +4974,17 @@
           renderStory();
         }).catch(function () {
           // Real backend unreachable — fall back to the honest local
-          // heuristic: only show the generic template if there's at least a
-          // real signal (an individual goal or a contributed decision);
-          // otherwise say plainly there's nothing to ask about, matching
-          // what the real model call would say, rather than always firing
-          // the same generic questions regardless of role.
-          var hasSignal = !!myGoal || myDecisions.length > 0;
+          // heuristic: a goal/decision signal still gets the generic
+          // role-based template, a real recent thread with no goal/decision
+          // gets a template naming that thread directly (see
+          // genericStoryFromThread) rather than nothing, and only truly
+          // having none of the three says plainly there's nothing to ask
+          // about, matching what the real model call would say.
+          var hasSignal = !!myGoal || myDecisions.length > 0 || myThreads.length > 0;
           ss.hasWork = hasSignal;
-          ss.story = hasSignal ? genericStoryFor(p) : null;
+          ss.story = (myGoal || myDecisions.length) ? genericStoryFor(p)
+            : myThreads.length ? genericStoryFromThread(p, myThreads[0])
+            : null;
           ss.offline = true;
           ss.questionsLoading = false; ss.questionsLoaded = true;
           renderStory();
@@ -5784,6 +6003,7 @@
     ui.boardQuery = this.value;
     renderDecisions(); // only rewrites #brain-board's own innerHTML, so this input keeps its value/focus
   });
+  document.getElementById("board-tidy-btn").addEventListener("click", tidyBoard);
 
   // "A regular AI assistant" vs. "Cognex" toggle in the new #explainer section
   // (2026-08-31: the old hero paragraph moved into its own section and got a

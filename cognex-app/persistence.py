@@ -412,6 +412,12 @@ class DecisionUpdateIn(BaseModel):
     tags: Optional[list] = None
     why: Optional[list] = None
     decided: Optional[str] = None
+    # Added 2026-09-02 for the Company Brain's "Tidy with AI" pass (see
+    # live.py's tidy_board_topics): a retroactive cleanup can reclassify a
+    # topic into a better-fitting department, not just rename it — every
+    # earlier caller of this endpoint never touches domain, so this stays
+    # untouched (None) for all of them.
+    domain: Optional[str] = None
 
 
 @router.put("/companies/{company_id}/decisions/{decision_id}")
@@ -432,6 +438,8 @@ def update_decision(company_id: str, decision_id: str, req: DecisionUpdateIn):
             d.why = req.why
         if req.decided is not None:
             d.decided = req.decided
+        if req.domain is not None:
+            d.domain = req.domain
         db.commit()
         return _decision_json(d)
 

@@ -1234,6 +1234,22 @@ def ask_stream(req: AskRequest):
 # directly per the founder's own framing: "if there's nothing to complete
 # there shouldn't be any questions, otherwise the questions need to be
 # specific."
+#
+# Extended 2026-09-02, direct founder feedback: "Complete the story doesnt
+# have anything right now but I have had quite a few convos with the model
+# and it should definitely have identified some parts of my convos that
+# require more clarification." The gap: this only ever looked at formal
+# signal — an assigned individual goal, or a Decision Memory entry with this
+# person listed as `contributor` — never at the actual content of their Ask
+# Cognex conversations (see ChatThread in models.py, added the same week).
+# Someone who mostly just talks to Cognex rather than filing goals/decisions
+# under their own name legitimately had zero signal before, no matter how
+# many real conversations they'd had. `recent_threads` below is a light
+# summary of that persona's own recent threads (title + their own messages,
+# not Cognex's answers — the ambiguity worth asking about lives in what THEY
+# said, not what the model already answered), and the model is now
+# explicitly told to look there for anything left vague or unresolved, not
+# just at goals/decisions.
 GENERATE_STORY_QUESTIONS_SCHEMA = {
     "name": "submit_story_questions",
     "description": "Submit whether there is real work to ask this person about, and if so, specific questions grounded in it.",
@@ -1243,20 +1259,26 @@ GENERATE_STORY_QUESTIONS_SCHEMA = {
             "has_work_to_capture": {
                 "type": "boolean",
                 "description": (
-                    "True ONLY if the goal/decision context given actually gives something concrete "
-                    "and current to ask about. False if there is genuinely nothing specific — no "
-                    "individual goal and no recent contributed decisions. Do not invent a plausible-"
-                    "sounding 'current priorities' question when there's nothing real to reference; "
-                    "many senior roles (CEO, CFO) legitimately have no single tracked individual goal, "
-                    "and that's a normal, expected false here, not a gap to paper over."
+                    "True if the goal/decision context OR the recent conversation excerpts given "
+                    "actually give something concrete and current to ask about — including a specific "
+                    "point left vague or unresolved in something they said in a recent conversation, "
+                    "even if there's no formal tracked goal or decision behind it. False only if there "
+                    "is genuinely nothing specific anywhere — no individual goal, no recent contributed "
+                    "decisions, and nothing in the conversation excerpts worth following up on. Do not "
+                    "invent a plausible-sounding 'current priorities' question when there's nothing "
+                    "real to reference; many senior roles (CEO, CFO) legitimately have no single "
+                    "tracked individual goal, and that's a normal, expected false here when there's "
+                    "also no conversation signal, not a gap to paper over."
                 ),
             },
             "work_item_label": {
                 "type": "string",
                 "description": (
-                    "A short, specific label for what's being captured, naming the actual goal or "
-                    "decision title given (e.g. the literal goal title, not a role-based placeholder "
-                    "like '<title> — current priorities'). Empty string if has_work_to_capture is false."
+                    "A short, specific label for what's being captured — the actual goal or decision "
+                    "title if that's the source, or a short name for the specific conversation topic "
+                    "being followed up on if it came from the conversation excerpts instead (e.g. the "
+                    "thread's own title). Never a role-based placeholder like '<title> — current "
+                    "priorities'. Empty string if has_work_to_capture is false."
                 ),
             },
             "questions": {
@@ -1267,7 +1289,7 @@ GENERATE_STORY_QUESTIONS_SCHEMA = {
                         "field": {"type": "string", "enum": ["who", "why", "risk"]},
                         "prompt": {
                             "type": "string",
-                            "description": "A specific question that names the actual goal or decision by title — never a generic templated question like 'why does this matter for the team right now'.",
+                            "description": "A specific question naming the actual goal, decision, or conversation topic by name and, where it applies, pointing at the specific thing that was left unclear — never a generic templated question like 'why does this matter for the team right now'.",
                         },
                     },
                     "required": ["field", "prompt"],
@@ -1280,8 +1302,11 @@ GENERATE_STORY_QUESTIONS_SCHEMA = {
 }
 
 
-def generate_story_questions(persona: dict, individual_goal: Optional[dict], recent_decisions: list) -> dict:
+def generate_story_questions(
+    persona: dict, individual_goal: Optional[dict], recent_decisions: list, recent_threads: Optional[list] = None
+) -> dict:
     client = Anthropic()
+    recent_threads = recent_threads or []
     context = f"{persona.get('name', '')}, {persona.get('title', '')}, {persona.get('dept', '')} department.\n"
     if individual_goal:
         context += f"Their individual goal: {individual_goal.get('title', '')}"
@@ -1290,19 +1315,29 @@ def generate_story_questions(persona: dict, individual_goal: Optional[dict], rec
         context += "\n"
     if recent_decisions:
         context += "Decisions they're a contributor on: " + "; ".join(d.get("title", "") for d in recent_decisions) + "\n"
-    if not individual_goal and not recent_decisions:
-        context += "No individual goal is assigned to them, and no decisions list them as a contributor.\n"
+    if recent_threads:
+        context += "\nExcerpts from their own recent Ask Cognex conversations (their own messages only — look here for anything left vague, unresolved, or worth a follow-up):\n"
+        for t in recent_threads:
+            snippet = " / ".join(m[:280] for m in (t.get("messages") or []) if m)
+            if snippet:
+                context += f'- Thread "{t.get("title", "")}": {snippet}\n'
+    if not individual_goal and not recent_decisions and not recent_threads:
+        context += "No individual goal is assigned to them, no decisions list them as a contributor, and they have no recent conversation history either.\n"
 
     response = client.messages.create(
         model=MODEL,
         max_tokens=768,
         system=(
-            "You decide whether there is real, specific work to ask this person about, based ONLY on "
-            "the goal/decision context given. If they have no individual goal and no recent "
-            "contributed decisions, set has_work_to_capture to false rather than asking generic "
-            "'what are your current priorities'-style questions — that produces meaningless answers "
-            "and wastes the person's time. If there IS real context, write 2-3 short, specific "
-            "questions that name the actual goal or decision by title, not generic filler."
+            "You decide whether there is real, specific work to ask this person about, based on the "
+            "goal/decision context AND the recent conversation excerpts given. Prefer grounding "
+            "questions in a genuine individual goal or contributed decision when one exists. When "
+            "there isn't one but recent conversation excerpts are given, read them for anything the "
+            "person raised without fully resolving — a plan mentioned but not detailed, a decision "
+            "implied but not confirmed, a risk or open question they didn't answer themselves — and "
+            "ask about THAT specifically, naming the actual topic. If neither the goal/decision "
+            "context nor the conversation excerpts give anything concrete, set has_work_to_capture to "
+            "false rather than asking generic 'what are your current priorities'-style questions — "
+            "that produces meaningless answers and wastes the person's time."
         ),
         tools=[GENERATE_STORY_QUESTIONS_SCHEMA],
         tool_choice={"type": "tool", "name": "submit_story_questions"},
@@ -1314,10 +1349,16 @@ def generate_story_questions(persona: dict, individual_goal: Optional[dict], rec
     raise RuntimeError("Claude did not return the expected submit_story_questions tool call.")
 
 
+class RecentThreadIn(BaseModel):
+    title: str = ""
+    messages: list[str] = []
+
+
 class StoryQuestionsRequest(BaseModel):
     persona: PersonaIn
     individual_goal: Optional[GoalIn] = None
     recent_decisions: list[DecisionIn] = []
+    recent_threads: list[RecentThreadIn] = []
 
 
 @router.post("/complete-story/questions")
@@ -1329,6 +1370,7 @@ def complete_story_questions(req: StoryQuestionsRequest):
             req.persona.model_dump(),
             req.individual_goal.model_dump() if req.individual_goal else None,
             [d.model_dump() for d in req.recent_decisions],
+            [t.model_dump() for t in req.recent_threads],
         )
     except Exception as e:
         _log_and_raise_502("complete-story/questions", e)
@@ -1588,6 +1630,132 @@ def consolidate_memory(candidates: list, new_content: dict) -> dict:
             result["domain"] = _normalize_domain(result.get("domain", ""), existing_domains)
             return result
     raise RuntimeError("Claude did not return the expected submit_memory_consolidation tool call.")
+
+
+# ---------------------------------------------------------------------------
+# "Tidy the board with AI" — added 2026-09-02, direct founder feedback on the
+# live board: "the node names are all my exact prompt, not the topic/sub-
+# topic... There is one category right now and it is already named 'other'."
+# consolidate_memory (above) already writes clean titles/departments for
+# every NEW save — but that's forward-only, and doesn't touch a topic that
+# was captured back when this ran offline (no ANTHROPIC_API_KEY configured,
+# so the frontend's own createAsDrafted fallback stored the raw prompt text
+# verbatim as the title, see static/index.html) or before this classifier
+# existed at all. This is the retroactive counterpart: given the board's
+# current TRUNK topics (branches/splits already got a real title from
+# whatever consolidation created them, so this is scoped to trunks only —
+# see the /board/tidy caller in static/index.html), rewrite each one's title
+# to a short, clean topic name and reclassify its department, reusing the
+# _normalize_domain backstop so this can't fragment "Product" into
+# "Product"/"product" the same way consolidate_memory already guards
+# against that on the forward path.
+# ---------------------------------------------------------------------------
+TIDY_BOARD_SCHEMA = {
+    "name": "submit_tidy_board",
+    "description": "Submit a cleaned-up title and department for each topic given.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "topics": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "Must exactly match one of the topic ids given."},
+                        "title": {
+                            "type": "string",
+                            "description": (
+                                "A short, clean, general topic title (a handful of words, like a section "
+                                "heading) describing the durable SUBJECT this topic is about — never a "
+                                "literal copy of the source text, a chat message, or the exact question "
+                                "someone asked. If the current title already reads as a clean topic name, "
+                                "it's fine to return it unchanged."
+                            ),
+                        },
+                        "domain": {
+                            "type": "string",
+                            "description": (
+                                "The department this topic belongs under. Reuse one of the existing "
+                                "departments listed in the prompt, copying its exact spelling, whenever it "
+                                "reasonably fits. Only invent a new short (1-3 word) department name when "
+                                "none of the existing ones fit — and prefer splitting a vague catch-all "
+                                "department like 'Other' into real departments over leaving things in it."
+                            ),
+                        },
+                    },
+                    "required": ["id", "title", "domain"],
+                },
+            }
+        },
+        "required": ["topics"],
+    },
+}
+
+
+def tidy_board_topics(topics: list) -> list:
+    client = Anthropic()
+    existing_domains: list = []
+    for t in topics:
+        d = (t.get("domain") or DEFAULT_DOMAIN).strip() or DEFAULT_DOMAIN
+        if d.lower() not in {x.lower() for x in existing_domains}:
+            existing_domains.append(d)
+    domains_block = ", ".join(f'"{d}"' for d in existing_domains) or "(none yet)"
+    topics_text = "\n\n".join(
+        f'- id="{t["id"]}" | current title="{t.get("title","")}" | current department={t.get("domain") or DEFAULT_DOMAIN}\n'
+        f'  detail: {(t.get("why") or [""])[0][:300]}'
+        for t in topics
+    )
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=4096,
+        system=(
+            "You are cleaning up a company's knowledge board. Each topic below currently has a messy "
+            "title — very often a literal verbatim copy of whatever chat message or question created "
+            "it, not a real topic name. For EACH topic given, write a short, clean, general topic title "
+            "(a handful of words, like a section heading — never a restatement of a question or a "
+            "literal prompt) and assign it to a department, reusing an exact existing spelling whenever "
+            "it genuinely fits. Departments already in use on this board: "
+            f"{domains_block}. Two topics that are really about the same underlying subject should get "
+            "the same or a very similar title. You must return exactly one result per topic id given, "
+            "in any order."
+        ),
+        tools=[TIDY_BOARD_SCHEMA],
+        tool_choice={"type": "tool", "name": "submit_tidy_board"},
+        messages=[{"role": "user", "content": f"Topics:\n\n{topics_text}"}],
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_tidy_board":
+            results = block.input.get("topics", [])
+            for r in results:
+                normalized = _normalize_domain(r.get("domain", ""), existing_domains)
+                r["domain"] = normalized
+                if normalized.lower() not in {x.lower() for x in existing_domains}:
+                    existing_domains.append(normalized)
+            return results
+    raise RuntimeError("Claude did not return the expected submit_tidy_board tool call.")
+
+
+class TidyTopicIn(BaseModel):
+    id: str
+    title: str
+    domain: str = ""
+    why: list[str] = []
+
+
+class TidyBoardRequest(BaseModel):
+    topics: list[TidyTopicIn] = []
+
+
+@router.post("/board/tidy")
+def board_tidy(req: TidyBoardRequest):
+    if not req.topics:
+        return {"topics": []}
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    try:
+        return {"topics": tidy_board_topics([t.model_dump() for t in req.topics])}
+    except Exception as e:
+        _log_and_raise_502("board/tidy", e)
 
 
 SPLIT_MEMORY_SCHEMA = {
@@ -1967,17 +2135,24 @@ def offboarding_extract(req: OffboardingExtractRequest):
 
 
 # ---------------------------------------------------------------------------
-# Vantage — the strategist / gap-finder. Detection of WHAT counts as a gap
-# (overdue review, orphaned goal, dead-end goal, overlapping decisions) is
-# deliberately deterministic plain-JS logic on the frontend (see
-# detectVantageCandidates() in static/index.html) — no model call is needed
-# to know a review date has passed or a goal has no children, and keeping
-# detection rule-based means it's auditable and doesn't hallucinate gaps that
-# aren't there. Claude's job here is narrower and lower-risk: take each
-# already-detected candidate and turn it into a clear, well-prioritized
-# write-up with a concrete suggested next step, for a specific viewer's
-# clearance — one candidate in, one polished gap out, never inventing new
-# gaps outside the candidates it was given.
+# The Vantage Room — the strategist / gap-finder (renamed from "Vantage"
+# 2026-09-02; internal identifiers below keep the shorter name). Detection of
+# WHAT counts as a gap (overdue review, orphaned goal, dead-end goal,
+# overlapping decisions) is deliberately deterministic plain-JS logic on the
+# frontend (see detectVantageCandidates() in static/index.html) — no model
+# call is needed to know a review date has passed or a goal has no children,
+# and keeping detection rule-based means it's auditable and doesn't
+# hallucinate gaps that aren't there. Claude's job here is narrower and
+# lower-risk: take each already-detected candidate and rewrite it in the
+# voice of a Company Strategy Head — a gap worth attacking now, or an idea
+# for expansion it points to — with a concrete suggested next step, for a
+# specific viewer's clearance. Still one candidate in, one polished gap out,
+# never inventing new gaps outside the candidates it was given. The frontend
+# then walks freshly surfaced gaps one at a time (see the vantageReviewQueue
+# handling around runVantageScan) rather than dumping the whole list at
+# once, direct founder feedback: "it should give random thoughts and the
+# user can choose to start a chat based on that thought... or choose to skip
+# it and get the next gap."
 # ---------------------------------------------------------------------------
 POLISH_GAPS_SCHEMA = {
     "name": "submit_vantage_gaps",
@@ -2016,14 +2191,16 @@ def polish_vantage_gaps(persona: dict, candidates: list) -> list:
         model=MODEL,
         max_tokens=2048,
         system=(
-            f"You are Vantage, Cognex's forward-looking strategist. You're writing for "
-            f"{persona.get('name','the viewer')} ({persona.get('title','')}, clearance level "
-            f"{persona.get('level', 1)} of 6). You are given a list of gap candidates already "
-            "detected by deterministic rules (overdue decision reviews, unassigned or dead-end "
-            "goals, decisions worth cross-checking) — your job is ONLY to write each one up "
-            "clearly and suggest one concrete next step. Stay strictly grounded in the summary "
-            "given for each candidate; do not invent additional facts, and do not add gaps beyond "
-            "the candidates given. Be direct and specific, not vague corporate-speak."
+            f"You are the Company Strategy Head inside The Vantage Room, Cognex's forward-looking "
+            f"strategy space. You're writing for {persona.get('name','the viewer')} "
+            f"({persona.get('title','')}, clearance level {persona.get('level', 1)} of 6). You are "
+            "given a list of gap candidates already detected by deterministic rules (overdue "
+            "decision reviews, unassigned or dead-end goals, decisions worth cross-checking) — your "
+            "job is to reframe each one as a genuine strategic thought: either a gap worth attacking "
+            "now, or an idea for expansion it points to. Stay strictly grounded in the summary given "
+            "for each candidate; do not invent additional facts, and do not add gaps beyond the "
+            "candidates given. Be direct and specific, like a sharp strategy lead thinking out loud, "
+            "not vague corporate-speak."
         ),
         tools=[POLISH_GAPS_SCHEMA],
         tool_choice={"type": "tool", "name": "submit_vantage_gaps"},
