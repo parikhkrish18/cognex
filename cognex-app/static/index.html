@@ -161,20 +161,31 @@
      card grids should genuinely move with scroll, not just fade in once).
      --p (0-1) is driven continuously by initSpiralScroll() as each card
      crosses the lower half of the viewport -- scrolling back up unwinds it
-     the same way, not a one-shot reveal. --sx/--sr/--sy (start offset/
-     rotation, set inline per card so alternating cards enter from
-     alternating sides) are the only per-card knobs; the curve itself lives
-     here. No transition on transform/opacity: the JS loop already writes a
-     new value every animation frame, so a CSS transition would just add
-     lag on top of an already-smooth update. */
+     the same way, not a one-shot reveal.
+
+     Second pass, same day: the first version combined translate3d(x,y) +
+     rotate, all driven off the same linear --p -- three axes moving in
+     lockstep trace a straight line, so every card visibly slid in on a
+     diagonal instead of a spiral. Fix: drop the independent x/y offset and
+     let the rotation itself do the work, pivoting around a point well
+     below the card's own box (transform-origin: 50% 180%) instead of its
+     center. Interpolating --sr toward 0 then sweeps the card along a real
+     circular arc -- it swings up and over into place, not along a ruler --
+     which is what actually reads as a spiral. --sr (sign picks the side
+     it swings in from, magnitude how far) is the only knob most cards set
+     inline; --sy is reserved for the one card that should rise straight
+     up with no swing at all (the centered pricing card, see below). No
+     transition on transform/opacity: the JS loop already writes a new
+     value every animation frame, so a CSS transition would just add lag
+     on top of an already-smooth update. */
   .spiral-card {
     --p: 1;
-    --sy: 46px;
+    transform-origin: 50% 180%;
     opacity: var(--p);
     transform:
-      translate3d(calc((1 - var(--p)) * var(--sx, 0px)), calc((1 - var(--p)) * var(--sy)), 0)
+      translate3d(0, calc((1 - var(--p)) * var(--sy, 0px)), 0)
       rotate(calc((1 - var(--p)) * var(--sr, 0deg)))
-      scale(calc(0.74 + var(--p) * 0.26));
+      scale(calc(0.8 + var(--p) * 0.2));
     will-change: transform, opacity;
   }
   @media (prefers-reduced-motion: reduce) {
@@ -896,32 +907,32 @@
         <h2>One memory. Everything that used to leak out of it, handled.</h2>
       </div>
       <div class="features-grid">
-        <div class="feature-card spiral-card" style="--sx:-64px;--sr:-13deg">
+        <div class="feature-card spiral-card" style="--sr:-32deg">
           <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="6" r="2.3"/><circle cx="12" cy="18" r="2.3"/><line x1="7.9" y1="7.3" x2="10.7" y2="16.1"/><line x1="16.1" y1="7.3" x2="13.3" y2="16.1"/><line x1="8.3" y1="6" x2="15.7" y2="6"/></svg></div>
           <h3>Notes and research, connected</h3>
           <p>Meeting notes, research, and past decisions all live in one place — connected to your company's actual context, not scattered across docs nobody reopens.</p>
         </div>
-        <div class="feature-card spiral-card" style="--sx:64px;--sr:13deg">
+        <div class="feature-card spiral-card" style="--sr:32deg">
           <div class="feature-icon" style="background:#fff1e0;color:#b45c09"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h13m0 0-4-4m4 4-4 4"/><path d="M20 15H7m0 0 4-4m-4 4 4 4"/></svg></div>
           <h3>Delegate without losing anything</h3>
           <p>Handoffs capture the open threads and reasoning, not just the task — so responsibility actually transfers instead of half-arriving.</p>
         </div>
-        <div class="feature-card spiral-card" style="--sx:-64px;--sr:-13deg">
+        <div class="feature-card spiral-card" style="--sr:-32deg">
           <div class="feature-icon" style="background:var(--purple-soft);color:var(--purple)"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><circle cx="10.5" cy="10.5" r="1.5" fill="currentColor" stroke="none"/><line x1="15.3" y1="15.3" x2="21" y2="21"/></svg></div>
           <h3>An AI that finds the gaps</h3>
           <p>Cognex scans your own goals and decisions, flags what's stalled or unowned, and drafts a next step — real strategy help, not just search.</p>
         </div>
-        <div class="feature-card spiral-card" style="--sx:64px;--sr:13deg">
+        <div class="feature-card spiral-card" style="--sr:32deg">
           <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
           <h3>Chain of command, protected</h3>
           <p>Every layer of the company gets the derived takeaway, never the raw record above their clearance. Structure stays intact as you grow.</p>
         </div>
-        <div class="feature-card spiral-card" style="--sx:-64px;--sr:-13deg">
+        <div class="feature-card spiral-card" style="--sr:-32deg">
           <div class="feature-icon" style="background:var(--green-soft);color:var(--green)"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="14" width="4" height="7" rx="1"/><rect x="10" y="9" width="4" height="12" rx="1"/><rect x="16.5" y="4" width="4" height="17" rx="1"/></svg></div>
           <h3>Everyone's work ladders up</h3>
           <p>Company goal → department → team → individual. “Why am I doing this” always traces back to real strategy — better organized, by default.</p>
         </div>
-        <div class="feature-card spiral-card" style="--sx:64px;--sr:13deg">
+        <div class="feature-card spiral-card" style="--sr:32deg">
           <div class="feature-icon" style="background:#f5e9fc;color:#7a2fb0"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="3"/><path d="M8 16.5l-2.2 4 5.3-4"/></svg></div>
           <h3>Ask Cognex anything</h3>
           <p>A real AI assistant grounded in all of the above — permission-checked before anything reaches it, so the answer is always the right size.</p>
@@ -938,7 +949,7 @@
         <p>A hypothetical, not a customer story. Four familiar layers of the same company, each asking Cognex something ordinary — and each getting exactly the version of the truth their layer should get.</p>
       </div>
       <div class="org-example">
-        <div class="org-card spiral-card" style="--sx:-80px;--sr:-10deg">
+        <div class="org-card spiral-card" style="--sr:-24deg">
           <div class="org-card-head">
             <div class="org-avatar" style="background:#1d1d1f;color:#fff">SJ</div>
             <div><div class="org-name">Steve Jobs</div><div class="org-title">CEO</div></div>
@@ -948,7 +959,7 @@
           <div class="org-feature"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><line x1="7.7" y1="7.1" x2="10.5" y2="16"/><line x1="16.3" y1="7.1" x2="13.5" y2="16"/><line x1="8" y1="6" x2="16" y2="6"/></svg>Decision Memory</div>
         </div>
         <div class="org-arrow">↓ one layer down</div>
-        <div class="org-card spiral-card" style="--sx:80px;--sr:10deg">
+        <div class="org-card spiral-card" style="--sr:24deg">
           <div class="org-card-head">
             <div class="org-avatar" style="background:#e8f0fe;color:#0071e3">SW</div>
             <div><div class="org-name">Steve Wozniak</div><div class="org-title">Co-founder &amp; Chief Engineer</div></div>
@@ -958,7 +969,7 @@
           <div class="org-feature"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.2"/><circle cx="10.5" cy="10.5" r="1.4" fill="currentColor" stroke="none"/><line x1="15" y1="15" x2="20.5" y2="20.5"/></svg>Gap-finding</div>
         </div>
         <div class="org-arrow">↓ one layer down</div>
-        <div class="org-card spiral-card" style="--sx:-80px;--sr:-10deg">
+        <div class="org-card spiral-card" style="--sr:-24deg">
           <div class="org-card-head">
             <div class="org-avatar" style="background:var(--green-soft);color:var(--green)">PM</div>
             <div><div class="org-name">A marketing lead</div><div class="org-title">Product Marketing</div></div>
@@ -968,7 +979,7 @@
           <div class="org-feature"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="13" width="3.6" height="7.5" rx="1"/><rect x="10.2" y="8.5" width="3.6" height="12" rx="1"/><rect x="16.9" y="4" width="3.6" height="16.5" rx="1"/></svg>Goal Alignment</div>
         </div>
         <div class="org-arrow">↓ one layer down</div>
-        <div class="org-card spiral-card" style="--sx:80px;--sr:10deg">
+        <div class="org-card spiral-card" style="--sr:24deg">
           <div class="org-card-head">
             <div class="org-avatar" style="background:#f5e9fc;color:#7a2fb0">GB</div>
             <div><div class="org-name">A Genius Bar employee</div><div class="org-title">Apple Store, Retail</div></div>
@@ -998,7 +1009,7 @@
         <p>Every plan includes Decision Memory, Goal Alignment, and Ask Cognex.</p>
       </div>
       <div class="pricing-grid">
-        <div class="pricing-card spiral-card" style="--sx:-36px;--sr:-6deg">
+        <div class="pricing-card spiral-card" style="--sr:-16deg">
           <div class="pricing-name">Starter</div>
           <div class="pricing-price">$19<span>/user/mo</span></div>
           <div class="pricing-sub">For small teams getting their memory started</div>
@@ -1011,7 +1022,7 @@
           </ul>
           <button class="btn-secondary btn-block landing-demo-cta">Book a demo</button>
         </div>
-        <div class="pricing-card featured spiral-card" style="--sx:0px;--sy:56px;--sr:0deg">
+        <div class="pricing-card featured spiral-card" style="--sy:56px;--sr:0deg">
           <span class="pricing-badge">Most popular</span>
           <div class="pricing-name">Business</div>
           <div class="pricing-price">$39<span>/user/mo</span></div>
@@ -1025,7 +1036,7 @@
           </ul>
           <button class="btn-primary btn-block landing-demo-cta">Book a demo</button>
         </div>
-        <div class="pricing-card spiral-card" style="--sx:36px;--sr:6deg">
+        <div class="pricing-card spiral-card" style="--sr:16deg">
           <div class="pricing-name">Enterprise</div>
           <div class="pricing-price">Custom</div>
           <div class="pricing-sub">For organizations with real compliance needs</div>
