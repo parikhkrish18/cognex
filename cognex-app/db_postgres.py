@@ -20,7 +20,7 @@ hard-failing), applied to persistence.
 
 import os
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from models import Base, Company, Decision, Goal, Persona
@@ -69,7 +69,71 @@ def _initials_of(name: str) -> str:
 
 def init_db():
     Base.metadata.create_all(engine)
+    _migrate_missing_columns()
     _seed_cognex_labs_if_empty()
+
+
+def _sql_default_literal(column):
+    """Turn a mapped_column's Python-side `default=` into a SQL literal we
+    can put in an ADD COLUMN ... DEFAULT clause, or None if it isn't a
+    plain scalar (a callable/JSON default can't be expressed this way --
+    those columns get added nullable, with existing rows left NULL)."""
+    default = column.default
+    if default is None or not getattr(default, "is_scalar", False):
+        return None
+    value = default.arg
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    return None
+
+
+def _migrate_missing_columns():
+    """create_all() only creates tables that don't exist yet -- it never
+    adds a new column to a table that's already there. That's exactly what
+    happened on 2026-09-01: the Brain Board redesign added `domain` and
+    `parent_id` to the Decision model, the code deployed cleanly, but the
+    live `decisions` table (already existing from before that change)
+    never picked up the new columns. Every company-load after that --
+    including the one login itself does right after checking the password
+    -- started throwing `UndefinedColumn: decisions.domain`, which surfaced
+    to users as a login/"couldn't load that company" failure that had
+    nothing to do with their password or being offline.
+
+    This is the fix, and the guard against the same class of bug next time
+    a column gets added to an existing table: on every startup, diff each
+    model's columns against what the live table actually has, and add
+    whatever's missing via a plain idempotent `ADD COLUMN IF NOT EXISTS`.
+    Where the model has a simple scalar Python default (e.g. domain's
+    "other"), that default is included in the ALTER so existing rows are
+    backfilled immediately instead of coming back NULL — matching what the
+    build log already assumed would happen. Postgres-only (`IF NOT EXISTS`
+    on ADD COLUMN is a Postgres extension); SQLite dev/test databases are
+    always created fresh via create_all() with every current column
+    already in place, so they never hit this gap."""
+    if not DATABASE_URL.startswith("postgresql"):
+        return
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue  # brand new table -- create_all() already built it with every column
+            existing_cols = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing_cols:
+                    continue
+                col_type = column.type.compile(dialect=engine.dialect)
+                default_literal = _sql_default_literal(column)
+                clause = f' ADD COLUMN IF NOT EXISTS "{column.name}" {col_type}'
+                if default_literal is not None:
+                    clause += f" DEFAULT {default_literal}"
+                    if not column.nullable:
+                        clause += " NOT NULL"
+                conn.execute(text(f'ALTER TABLE "{table.name}"' + clause))
+                print(f"[migrate] added missing column {table.name}.{column.name}", flush=True)
 
 
 def _seed_cognex_labs_if_empty():
