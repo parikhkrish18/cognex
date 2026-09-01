@@ -336,6 +336,7 @@ class Decision:
     tags: list = field(default_factory=list)
     derived: str = ""
     contributor: Optional[str] = None
+    domain: str = "other"
 
 
 @dataclass
@@ -370,6 +371,7 @@ def serialize_decision_for(level: int, d: Decision) -> dict:
     base = {
         "id": d.id, "title": d.title, "decided": d.decided, "owner": d.owner,
         "clearance_required": LEVEL_LABEL.get(d.visibility, "?"), "access": mode,
+        "domain": d.domain,
     }
     if mode == "source":
         base.update({
@@ -638,7 +640,7 @@ def _decisions_index(persona: Persona, decisions: list) -> str:
     visible.sort(key=lambda pair: pair[0].decided or "", reverse=True)
     lines = []
     for d, preview in visible[:40]:
-        line = f'- {d.id}: "{d.title}"'
+        line = f'- [{d.domain}] {d.id}: "{d.title}"'
         if preview:
             line += f" — {preview}"
         lines.append(line)
@@ -1059,6 +1061,7 @@ class DecisionIn(BaseModel):
     tags: list = []
     derived: str = ""
     contributor: Optional[str] = None
+    domain: str = "other"
 
 
 class GoalIn(BaseModel):
@@ -1332,67 +1335,116 @@ def complete_story_questions(req: StoryQuestionsRequest):
 
 
 # ---------------------------------------------------------------------------
-# Memory consolidation — the Brain Board, added 2026-08-30. The founder's
-# explicit call (asked directly rather than guessed): Decision Memory should
-# stop growing one record per save and instead read as a small, evolving set
-# of topic nodes around a central "company brain" — a real collective
-# summary, not a chat transcript. Every save path (Ask Cognex's "Save to
+# Memory consolidation — the Brain Board. Originally added 2026-08-30 so
+# Decision Memory would read as a small, evolving set of topic nodes instead
+# of one record per save; extended 2026-08-31 into a real department-hub
+# tree per direct founder feedback ("I want core business departments...
+# stranded into smaller parts over time as the brain of the company grows...
+# consolidate or expand smartly"). Every save path (Ask Cognex's "Save to
 # Decision Memory", Complete the Story, the Slack candidate-confirm flow,
-# Vantage's "mark plan done") now calls this endpoint FIRST: given the
-# board's existing nodes (lightweight: id/title/tags/current summary — full
-# why/alternatives/risks content is deliberately NOT sent, to keep this call
-# fast and cheap) and the new content just captured, Claude decides whether
-# it's really the same topic as an existing node (merge, rewriting that
-# node's summary to reflect everything now known together) or genuinely new
-# (a new node). This is a real judgment call, not a keyword-overlap
-# heuristic — "we sell design services to startups" and "we're a boutique
-# design and engineering studio" are the same topic despite sharing almost
-# no words, and a keyword match would have missed that (see the 2026-08-29
-# memory-grounding entry, the same class of gap on the search side of this
-# feature).
+# Vantage's "mark plan done") now calls consolidate_memory FIRST: given the
+# board's existing nodes (lightweight: id/title/tags/domain/parent/child
+# count/current summary — full why/alternatives/risks content is
+# deliberately NOT sent, to keep this call
+# fast and cheap) and the new content just captured, Claude assigns a broad
+# knowledge domain and picks one of four actions:
+#   - "new_trunk"  — a genuinely new top-level topic under a domain that has
+#                    no good existing home for it yet.
+#   - "new_branch" — a specific, distinct sub-topic under an existing trunk
+#                    (or branch) — the domain's tree gains a new limb, the
+#                    "expand" the founder asked for.
+#   - "merge"      — really the same topic as an existing node; fold in and
+#                    rewrite its summary (the "consolidate" the founder
+#                    asked for, same behavior this had before 2026-08-31).
+#   - "split"      — merging into the target would blur together genuinely
+#                    distinct sub-topics that each deserve their own node.
+#                    A second, more expensive call (plan_memory_split)
+#                    only fires on this rare path, given that ONE node's
+#                    full history, to actually partition it — see below for
+#                    why this is a separate call rather than one bigger one.
+# This is still a real judgment call, not a keyword-overlap heuristic — "we
+# sell design services to startups" and "we're a boutique design and
+# engineering studio" are the same topic despite sharing almost no words
+# (see the 2026-08-29 memory-grounding entry, the same class of gap on the
+# search side of this feature). Deliberately scoped to depth-2 splitting
+# only (v1): a node that already has children of its own can't be split
+# again in this pass (downgraded to "merge" instead, see the guard block
+# below) — recursively re-splitting an already-split node means deciding
+# which grandchild subtree absorbs which surviving fact, real complexity
+# not asked for here.
+DOMAIN_KEYS = ["product", "gtm", "ops", "pricing", "hiring", "other"]
+DOMAIN_LABELS = {
+    "product": "Product — what the company builds/sells",
+    "gtm": "Go-to-market — marketing, sales, customer acquisition",
+    "ops": "Operations — supply chain, vendors, day-to-day running of the business",
+    "pricing": "Pricing & unit economics",
+    "hiring": "Hiring & team",
+    "other": "Anything that genuinely doesn't fit the above",
+}
+
 CONSOLIDATE_MEMORY_SCHEMA = {
     "name": "submit_memory_consolidation",
     "description": (
-        "Decide whether newly captured information belongs on an existing Decision Memory node "
-        "(the same topic) or needs a new node, and produce the resulting title/summary/tags."
+        "Assign a broad knowledge domain to newly captured information and decide how it fits onto "
+        "the company's existing Decision Memory tree: fold into an existing node, hang a new sharper "
+        "branch off one, start a new top-level topic, or split an existing node apart."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "action": {
+            "domain": {
                 "type": "string",
-                "enum": ["merge", "new_node"],
+                "enum": DOMAIN_KEYS,
                 "description": (
-                    "'merge' if the new information is really about the same topic as one of the "
-                    "existing nodes listed — prefer this whenever there's real topical overlap, since "
-                    "the whole point is fewer, richer nodes rather than one per save. 'new_node' only "
-                    "when it genuinely doesn't fit any existing node's topic."
+                    "The broad knowledge domain this belongs to: "
+                    + "; ".join(f"{k} = {v}" for k, v in DOMAIN_LABELS.items())
+                    + ". For 'merge' or 'split', this SHOULD match the target node's own domain — it is "
+                    "not used to move an already-placed node to a different domain."
                 ),
             },
-            "merge_into_id": {
+            "action": {
                 "type": "string",
-                "description": "The exact id of the existing node to merge into, copied from the candidate list. Required when action is 'merge'; empty string otherwise.",
+                "enum": ["new_trunk", "new_branch", "merge", "split"],
+                "description": (
+                    "'merge' — really the same topic as an existing node (prefer this whenever there's "
+                    "real overlap). 'new_branch' — a specific, genuinely distinct sub-topic that belongs "
+                    "UNDER an existing trunk/branch (e.g. a specific outreach tactic under an existing "
+                    "broad 'customer acquisition' node) — use this instead of 'merge' when folding it in "
+                    "would blur together things someone would want to see separately, and instead of "
+                    "'new_trunk' when a sensible parent already exists. 'new_trunk' — a genuinely new "
+                    "top-level topic with no existing node in its domain it belongs under. 'split' — an "
+                    "EXISTING node (named as target_id) has accumulated enough genuinely distinct "
+                    "sub-topics that it should be broken apart; only choose this for a node whose "
+                    "child_count is 0 in the candidate list (it has no sub-topics yet)."
+                ),
+            },
+            "target_id": {
+                "type": "string",
+                "description": (
+                    "The exact id, copied from the candidate list: the node to merge into (merge), the "
+                    "parent trunk/branch to attach under (new_branch), or the node to split apart "
+                    "(split). Empty string for new_trunk."
+                ),
             },
             "title": {
                 "type": "string",
-                "description": "A short, clear topic title (e.g. 'What we sell', 'Pricing strategy', 'Q4 product launch'). For a merge, refine the existing title only if the new content genuinely broadens the topic; otherwise keep it close to what's already there.",
+                "description": "A short, clear topic title. Ignored when action is 'split' (see plan_memory_split, which titles the resulting nodes instead).",
             },
             "summary": {
                 "type": "string",
                 "description": (
                     "One coherent paragraph describing everything currently known about this topic, "
                     "written fresh to incorporate the new information — not the old summary with the "
-                    "new fact bolted on, and not just the new fact alone. This is what someone sees "
-                    "at a glance on the board."
+                    "new fact bolted on. Ignored when action is 'split'."
                 ),
             },
             "tags": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "3-8 short lowercase topic tags for this node (merged with, not replacing, any relevant existing tags for a merge).",
+                "description": "3-8 short lowercase topic tags. Ignored when action is 'split'.",
             },
         },
-        "required": ["action", "merge_into_id", "title", "summary", "tags"],
+        "required": ["domain", "action", "target_id", "title", "summary", "tags"],
     },
 }
 
@@ -1401,7 +1453,9 @@ def consolidate_memory(candidates: list, new_content: dict) -> dict:
     client = Anthropic()
     if candidates:
         cand_lines = [
-            f'- id="{c.get("id","")}" | title="{c.get("title","")}" | tags={c.get("tags", [])} | current summary: {c.get("derived","") or "(none yet)"}'
+            f'- id="{c.get("id","")}" | title="{c.get("title","")}" | domain={c.get("domain","other")} | '
+            f'parent={c.get("parent_id") or "(none — this is a trunk)"} | child_count={c.get("child_count", 0)} | '
+            f'tags={c.get("tags", [])} | current summary: {c.get("derived","") or "(none yet)"}'
             for c in candidates
         ]
         candidates_block = "\n".join(cand_lines)
@@ -1420,31 +1474,24 @@ def consolidate_memory(candidates: list, new_content: dict) -> dict:
         model=MODEL,
         max_tokens=768,
         system=(
-            "You maintain a company's collective knowledge board -- a small set of BROAD topic nodes "
-            "(think of the handful of areas a new hire would need briefing on: the product/what the "
-            "company sells, go-to-market and customer acquisition, operations and supply chain, pricing "
-            "and unit economics, hiring and team, etc.) -- not a growing pile of narrow one-off notes, "
-            "and not one node per question someone happened to ask. Reported directly by the founder "
-            "(2026-08-31): earlier behavior left the board looking like a sprawling web of narrow, "
-            "single-fact nodes instead of a small set of nodes that actually show what the company "
-            "collectively knows -- your job is to prevent that.\n\n"
-            "Decide whether the new information belongs on one of the existing nodes listed (merge into "
-            "it, rewriting its summary to reflect everything now known about that broader area together) "
-            "or is genuinely a new area of knowledge with no real home yet (create a new node). Default "
-            "to merging: if the new information is a specific instance, example, or detail WITHIN a "
-            "broader area an existing node already covers (e.g. a specific outreach tactic belongs under "
-            "an existing 'customer acquisition' or 'marketing' node; a specific vendor risk belongs under "
-            "an existing 'operations'/'supply chain' node), merge into it and fold the new specifics into "
-            "the summary -- do not create a narrow new node just because the exact wording or sub-topic "
-            "wasn't covered before. Only create a new node when the information is about a genuinely "
-            "different area of the business that none of the existing nodes are really about at all. The "
-            "more nodes already exist, the harder you should lean toward merging rather than adding "
-            "another -- a board with a dozen or more nodes has almost certainly fragmented too far, and "
-            "you should actively look for the best-fit existing node to fold new information into rather "
-            "than defaulting to a fresh one. The summary you write must read as one coherent paragraph "
-            "describing the current state of knowledge on that broader topic, not the newest fact bolted "
-            "onto old text -- it should genuinely teach someone what the company now knows in this area, "
-            "not just log that something happened."
+            "You maintain a company's collective knowledge board as a small TREE of broad department "
+            "areas (think of the handful of areas a new hire would need briefing on: the product/what "
+            "the company sells, go-to-market and customer acquisition, operations and supply chain, "
+            "pricing and unit economics, hiring and team, etc.), each of which can grow sharper "
+            "sub-topic branches over time as real knowledge in that area deepens — NOT a flat pile of "
+            "narrow one-off notes, and not one node per question someone happened to ask.\n\n"
+            "Default to 'merge' whenever the new information is really about the same topic as an "
+            "existing node — a specific instance or detail WITHIN a broader area an existing node "
+            "already covers, folded into its summary rather than kept separate just because the exact "
+            "wording wasn't covered before. Reach for 'new_branch' when the new information is a "
+            "genuinely distinct sub-topic that deserves its own node but clearly belongs under an "
+            "existing trunk — this is how a domain's knowledge grows sharper branches over time instead "
+            "of one node trying to cover everything on its own. Only use 'new_trunk' when nothing in "
+            "that domain is a sensible parent at all. Use 'split' only when a listed node's own "
+            "child_count is 0 and merging the new information into it would blur together things that "
+            "genuinely deserve separate nodes — this should be rare; most saves should merge or branch, "
+            "not split. The board should stay small and legible: the more nodes already exist in a "
+            "domain, the harder you should lean toward merge/branch over creating something new."
         ),
         tools=[CONSOLIDATE_MEMORY_SCHEMA],
         tool_choice={"type": "tool", "name": "submit_memory_consolidation"},
@@ -1453,16 +1500,145 @@ def consolidate_memory(candidates: list, new_content: dict) -> dict:
     for block in response.content:
         if block.type == "tool_use" and block.name == "submit_memory_consolidation":
             result = dict(block.input)
-            # Defense-in-depth against a hallucinated id: never let a
-            # "merge" into an id that isn't actually one of the candidates
-            # given silently corrupt a different node or 404 downstream --
-            # downgrade to a new node instead, which is always safe.
             candidate_ids = {c.get("id") for c in candidates}
-            if result.get("action") == "merge" and result.get("merge_into_id") not in candidate_ids:
-                result["action"] = "new_node"
-                result["merge_into_id"] = ""
+            candidate_by_id = {c.get("id"): c for c in candidates}
+            action = result.get("action")
+            # Defense-in-depth against a hallucinated id: never let a
+            # "merge"/"new_branch"/"split" target an id that isn't actually
+            # one of the candidates given silently corrupt a different node
+            # or 404 downstream — downgrade to "new_trunk" instead, which
+            # is always safe (worst case one extra node, never data loss).
+            if action in ("merge", "new_branch", "split") and result.get("target_id") not in candidate_ids:
+                action = "new_trunk"
+                result["target_id"] = ""
+            # A "split" target that already has children is out of scope
+            # for v1 (see module comment above) — downgrade to "merge"
+            # instead of silently no-op'ing or erroring, so the save still
+            # lands somewhere sensible even when the model picks split on
+            # a node it shouldn't have.
+            elif action == "split" and candidate_by_id.get(result.get("target_id"), {}).get("child_count", 0) > 0:
+                action = "merge"
+            result["action"] = action
             return result
     raise RuntimeError("Claude did not return the expected submit_memory_consolidation tool call.")
+
+
+SPLIT_MEMORY_SCHEMA = {
+    "name": "submit_memory_split",
+    "description": (
+        "Partition one overloaded Decision Memory node's full history into 2-4 sharper, genuinely "
+        "distinct sub-nodes, plus a short umbrella description for the original node."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "trunk_title": {"type": "string", "description": "The original node's title going forward — usually unchanged or only slightly broadened."},
+            "trunk_summary": {
+                "type": "string",
+                "description": (
+                    "A SHORT umbrella description of this broader topic now that its detail lives in the "
+                    "children below — not a repeat of any one child's content."
+                ),
+            },
+            "trunk_tags": {"type": "array", "items": {"type": "string"}, "description": "3-6 broad tags for the umbrella topic."},
+            "split_children": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "A short, sharp title for this sub-topic."},
+                        "summary": {"type": "string", "description": "One coherent paragraph describing everything known about this specific sub-topic."},
+                        "tags": {"type": "array", "items": {"type": "string"}, "description": "3-8 short lowercase tags."},
+                        "why_indices": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "0-based indices into the target node's existing why[] history that belong to this sub-topic. Every index across all children must appear exactly once — nothing may be dropped or duplicated.",
+                        },
+                    },
+                    "required": ["title", "summary", "tags", "why_indices"],
+                },
+                "description": "2-4 sharper sub-nodes to split the target's accumulated history into.",
+            },
+            "new_content_child_index": {
+                "type": "integer",
+                "description": "0-based index into split_children: which new sub-node the brand-new information just captured belongs to.",
+            },
+        },
+        "required": ["trunk_title", "trunk_summary", "trunk_tags", "split_children", "new_content_child_index"],
+    },
+}
+
+
+def plan_memory_split(target: dict, new_content: dict) -> dict:
+    """The second, more expensive call in the split path — only invoked
+    when consolidate_memory() above has already decided a specific node
+    (given here in FULL, including its complete why[] history) has
+    genuinely outgrown itself. Kept as a separate call on purpose: the
+    first call runs on EVERY save and is deliberately cheap (lightweight
+    candidate summaries only, no full history for the whole board);
+    sending every node's full why[] on every save just in case it might
+    need splitting would defeat that. This call only ever looks at ONE
+    node's full content, and only fires on the rare path where splitting
+    was actually chosen."""
+    client = Anthropic()
+    why = target.get("why") or []
+    why_block = "\n".join(f"[{i}] {line}" for i, line in enumerate(why)) or "(no prior history — only the new content below)"
+    context = (
+        f"Node to split: \"{target.get('title','')}\" (domain: {target.get('domain','other')})\n"
+        f"Current tags: {target.get('tags', [])}\n"
+        f"Current summary: {target.get('derived','') or '(none)'}\n\n"
+        f"Full history (each line is one prior save, indexed):\n{why_block}\n\n"
+        "New information just captured that triggered this split:\n"
+        f"Source: {new_content.get('source_kind', '')} (by {new_content.get('source_persona', '')} on {new_content.get('date', '')})\n"
+        f"Content: {new_content.get('body', '')}\n"
+    )
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        system=(
+            "Split this one overloaded Decision Memory node into 2-4 sharper, genuinely distinct "
+            "sub-nodes. Every existing why[] line must end up assigned to exactly one child — read each "
+            "line and group it by which specific sub-topic it's really about. trunk_summary should be "
+            "short and umbrella-level now that detail lives in the children, not a copy of any one "
+            "child's content."
+        ),
+        tools=[SPLIT_MEMORY_SCHEMA],
+        tool_choice={"type": "tool", "name": "submit_memory_split"},
+        messages=[{"role": "user", "content": context}],
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_memory_split":
+            result = dict(block.input)
+            children = result.get("split_children") or []
+            n = len(why)
+            # Defense-in-depth: the model's why_indices partition must
+            # cover every existing history line exactly once. Rather than
+            # trust it blindly (a dropped line is silent data loss; a
+            # duplicated one shows the same fact twice), repair any gap or
+            # overlap deterministically instead of failing the whole split.
+            seen = set()
+            for child in children:
+                fixed = []
+                for idx in child.get("why_indices", []):
+                    if isinstance(idx, int) and 0 <= idx < n and idx not in seen:
+                        fixed.append(idx)
+                        seen.add(idx)
+                child["why_indices"] = fixed
+            missing = [i for i in range(n) if i not in seen]
+            if missing and children:
+                # Any line the model failed to place lands on the largest
+                # child rather than being silently dropped.
+                largest = max(children, key=lambda c: len(c["why_indices"]))
+                largest["why_indices"].extend(missing)
+            idx = result.get("new_content_child_index", 0)
+            if not isinstance(idx, int) or not (0 <= idx < len(children)):
+                idx = 0
+            result["new_content_child_index"] = idx
+            result["split_children"] = children
+            return result
+    raise RuntimeError("Claude did not return the expected submit_memory_split tool call.")
 
 
 class MemoryCandidateIn(BaseModel):
@@ -1470,6 +1646,9 @@ class MemoryCandidateIn(BaseModel):
     title: str
     tags: list[str] = []
     derived: str = ""
+    domain: str = "other"
+    parent_id: Optional[str] = None
+    child_count: int = 0
 
 
 class NewMemoryContentIn(BaseModel):
@@ -1493,6 +1672,37 @@ def memory_consolidate(req: ConsolidateMemoryRequest):
         return consolidate_memory([c.model_dump() for c in req.candidates], req.new_content.model_dump())
     except Exception as e:
         _log_and_raise_502("memory/consolidate", e)
+
+
+class SplitTargetIn(BaseModel):
+    id: str
+    title: str
+    tags: list[str] = []
+    derived: str = ""
+    domain: str = "other"
+    why: list = []
+
+
+class SplitMemoryRequest(BaseModel):
+    target: SplitTargetIn
+    new_content: NewMemoryContentIn
+
+
+@router.post("/memory/split_plan")
+def memory_split_plan(req: SplitMemoryRequest):
+    # The second call in the split path (see plan_memory_split's own
+    # docstring for why this is a separate endpoint from /memory/consolidate
+    # rather than one bigger call) — the frontend only calls this after
+    # /memory/consolidate has already returned action="split", and sends
+    # the target node's FULL why[] history (already held client-side in
+    # company.decisions, never re-fetched) since that's what a real split
+    # decision needs to read.
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
+    try:
+        return plan_memory_split(req.target.model_dump(), req.new_content.model_dump())
+    except Exception as e:
+        _log_and_raise_502("memory/split_plan", e)
 
 
 class StoryExtractRequest(BaseModel):

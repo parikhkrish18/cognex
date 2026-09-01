@@ -630,37 +630,109 @@
   .review-banner ul { margin: 6px 0 0; padding-left: 18px; }
   .review-banner li { margin-bottom: 4px; }
 
-  /* ============ Company Brain — Decision Memory board, replaces the card
-     grid entirely (2026-08-30, per the founder's own call: not a growing
-     list of one-per-save cards, a small evolving set of topic nodes around
-     a central "brain"). Radial layout in plain percentage coordinates (an
-     SVG with viewBox="0 0 100 100") rather than a pixel-measuring JS layout
+  /* ============ Company Brain — Decision Memory board. Redesigned
+     2026-08-31 into a department-hub tree (see the layoutBoardTree/
+     boardRingSvg/DOMAIN_META comment in the JS for the full rationale) --
+     was a flat one-ring layout since 2026-08-30; now a fixed colored ring
+     of department sectors with topics ("trunks") on the ring and
+     sub-topic branches radiating outward as a department's knowledge gets
+     split into sharper parts. Still plain percentage coordinates (an SVG
+     with viewBox="0 0 100 100") rather than a pixel-measuring JS layout
      library or a physics simulation -- keeps this dependency-free like the
      rest of the app, and is naturally responsive since percentages scale
-     with the container automatically. ============ */
+     with the container automatically. Domain colors are the dataviz
+     skill's validated default categorical palette (light-mode contrast/CVD
+     checked with scripts/validate_palette.js, including the ring's
+     wrap-around adjacent pair since it's a closed circle, not a bar chart's
+     open line) -- this app has no dark mode, so only the light steps are
+     used. ============ */
   .board-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
   .board-title { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
   .board-sub { font-size: 13px; color: var(--ink-faint); margin-top: 3px; max-width: 52ch; }
   .board-search { border: 1px solid var(--border); border-radius: 999px; padding: 8px 16px; font-size: 13px; font-family: inherit; width: 220px; flex: none; background: var(--surface); }
   .board-search::placeholder { color: var(--ink-faint); }
+  /* A legend row for the ring's colors, per the dataviz skill's rule that
+     identity is never carried by color alone -- each domain also has a
+     text label here (and inside every node's own hover tooltip/detail
+     badge), never just a colored dot on its own. */
+  .board-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 2px; font-size: 12px; color: var(--ink-soft); }
+  .board-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+  .board-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
   .brain-board { position: relative; width: 100%; max-width: 720px; aspect-ratio: 1; margin: 12px auto 4px; }
+  .board-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
   .board-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-  .board-lines line { stroke: var(--border-soft); stroke-width: 0.35; transition: stroke .15s ease, stroke-width .15s ease; }
-  .board-lines line.hot { stroke: var(--accent-ink); stroke-width: 0.6; }
+  .board-lines line { stroke-width: 0.4; opacity: 0.55; transition: stroke-width .15s ease, opacity .15s ease; }
+  .board-lines line.hot { stroke: var(--accent-ink) !important; stroke-width: 0.75; opacity: 1; }
   .brain-core { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 92px; height: 92px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, var(--accent-soft), var(--surface-2)); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 0 0 7px var(--surface), 0 6px 20px rgba(0,0,0,0.08); font-size: 30px; z-index: 2; animation: brainPulse 3.6s ease-in-out infinite; }
   .brain-core .board-count { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); margin-top: 3px; letter-spacing: .01em; }
   @keyframes brainPulse { 0%, 100% { box-shadow: 0 0 0 7px var(--surface), 0 6px 20px rgba(0,0,0,0.08); } 50% { box-shadow: 0 0 0 10px var(--surface), 0 8px 28px rgba(0,113,227,0.16); } }
   .board-node { position: absolute; transform: translate(-50%, -50%); width: 116px; text-align: center; cursor: pointer; z-index: 1; transition: transform .15s ease, opacity .15s ease; }
-  .board-node:hover, .board-node:focus-visible { transform: translate(-50%, -50%) scale(1.07); z-index: 3; }
+  .board-node:hover, .board-node:focus-visible, .board-node.hot-parent { transform: translate(-50%, -50%) scale(1.07); z-index: 3; }
   .board-node.dimmed { opacity: 0.22; }
-  .board-node-bubble { width: 62px; height: 62px; margin: 0 auto 6px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border-soft); display: flex; align-items: center; justify-content: center; font-size: 21px; position: relative; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  .board-node-bubble { width: 62px; height: 62px; margin: 0 auto 6px; border-radius: 50%; background: var(--surface); border: 2.5px solid var(--border-soft); display: flex; align-items: center; justify-content: center; font-size: 21px; position: relative; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  /* Domain color owns the border on an ordinary (fully-visible) node --
+     the second, distinct encoding channel from clearance state below, per
+     the dataviz skill's "color follows identity, never collides with a
+     different meaning on the same channel" rule. Declared BEFORE
+     .locked/.derived so those two still win by source order when a node
+     is also restricted -- clearance state is the more urgent signal. */
+  .board-node.dom-product .board-node-bubble { border-color: #2a78d6; }
+  .board-node.dom-gtm .board-node-bubble { border-color: #eb6834; }
+  .board-node.dom-ops .board-node-bubble { border-color: #1baf7a; }
+  .board-node.dom-pricing .board-node-bubble { border-color: #eda100; }
+  .board-node.dom-hiring .board-node-bubble { border-color: #e87ba4; }
+  .board-node.dom-other .board-node-bubble { border-color: #008300; }
   .board-node.locked .board-node-bubble { border-color: var(--red); opacity: 0.6; }
   .board-node.derived .board-node-bubble { border-color: var(--accent-ink); }
   .board-node.needs-review .board-node-bubble::after { content: ""; position: absolute; top: -2px; right: -2px; width: 12px; height: 12px; border-radius: 50%; background: #ff9500; border: 2px solid var(--surface); }
+  /* Branches (depth 1) and their own sub-branches (depth 2+) shrink a step
+     each, matching the reference skill-wheel's smaller peripheral icons --
+     a topic that's been split visibly reads as "more specific" the further
+     out it sits, not just by position but by size. */
+  /* Shrinking the node's own width (not just its bubble) at deeper depths
+     matters beyond looks: .board-node's hit area is invisibly wider than
+     the bubble it draws, and real testing found a depth-1 node's full
+     116px-wide hit box overlapping a depth-2 child sitting close to it
+     radially, silently intercepting clicks meant for the child underneath.
+     Shrinking the box alongside the bubble keeps deeper, tighter-packed
+     nodes individually clickable. */
+  .board-node.depth-1 { width: 92px; }
+  .board-node.depth-1 .board-node-bubble { width: 50px; height: 50px; font-size: 17px; }
+  .board-node.depth-1 .board-node-title { font-size: 10.5px; }
+  .board-node.depth-2 { width: 76px; }
+  .board-node.depth-2 .board-node-bubble { width: 42px; height: 42px; font-size: 14px; }
+  .board-node.depth-2 .board-node-title { font-size: 10px; }
+  /* A domain sector holding more trunks than fit comfortably on one ring
+     gets split into several rings by layoutBoardTree's placeTrunks() --
+     every trunk in a split sector is flagged "crowded," not just the
+     outer rings, since they're all sharing a narrower per-trunk slice
+     than an uncrowded domain gets. Shrunk further than the depth-1/2
+     step above: these are still real trunks (full opacity, no
+     depth-based dimming), just packed tighter, and the click-target
+     needs the extra margin real testing showed a lighter shrink still
+     didn't clear. */
+  .board-node.crowded { width: 60px; }
+  .board-node.crowded .board-node-bubble { width: 34px; height: 34px; font-size: 13px; }
+  .board-node.crowded .board-node-title { font-size: 9px; }
   .board-node-title { font-size: 11.5px; font-weight: 600; color: var(--ink); line-height: 1.25; }
-  .board-node-del { position: absolute; top: -3px; right: 18px; width: 19px; height: 19px; border-radius: 50%; border: none; background: var(--surface); color: var(--ink-faint); font-size: 11px; line-height: 1; box-shadow: 0 1px 5px rgba(0,0,0,0.18); opacity: 0; cursor: pointer; }
+  /* z-index matters here, not just cosmetically: this button sits earlier
+     in the DOM than .board-node-bubble, so without it the bubble (auto
+     stacking, painted later) sits on top and silently eats its clicks --
+     real testing hit exactly that on a "crowded" node, where the smaller
+     shrunk box brings the bubble's square hit area close enough to the
+     button's own corner to cover it. */
+  .board-node-del { position: absolute; top: -3px; right: 18px; width: 19px; height: 19px; border-radius: 50%; border: none; background: var(--surface); color: var(--ink-faint); font-size: 11px; line-height: 1; box-shadow: 0 1px 5px rgba(0,0,0,0.18); opacity: 0; cursor: pointer; z-index: 2; }
   .board-node:hover .board-node-del { opacity: 1; }
   .board-node-del:hover { color: var(--red); }
+  .board-node-children { position: absolute; top: -3px; left: 30px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px; background: var(--ink); color: var(--surface); font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center; box-shadow: 0 0 0 2px var(--surface); }
+  /* An empty department "slot" -- the fixed scaffolding the founder asked
+     for, visible before any topic exists there so a company can see where
+     Pricing (say) will grow in, not just where it already has. Deliberately
+     not interactive: there's no real record behind it, only a tooltip. */
+  .board-node-ghost { pointer-events: auto; cursor: default; opacity: 0.4; }
+  .board-node-ghost .board-node-bubble { background: transparent; border-style: dashed; border-width: 2px; width: 34px; height: 34px; box-shadow: none; }
+  .board-tree-note { font-size: 12.5px; color: var(--ink-faint); margin: 2px 0 10px; }
+  .board-tree-note .link-btn { font-size: 12.5px; }
   .board-detail-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; }
   .board-detail-head h3 { font-size: 18px; letter-spacing: -0.01em; margin-right: auto; }
   .board-detail-close { flex: none; border: none; background: none; color: var(--ink-faint); cursor: pointer; font-size: 18px; padding: 2px 4px; line-height: 1; }
@@ -1108,10 +1180,11 @@
             <div class="board-toolbar">
               <div>
                 <div class="board-title">Company Brain</div>
-                <div class="board-sub">Everything Cognex has learned, consolidated by topic — not a growing list of individual saves.</div>
+                <div class="board-sub">Organized by department, growing sharper branches as each area gets more topics — not a growing list of individual saves.</div>
               </div>
               <input type="search" id="board-search" class="board-search" placeholder="Filter topics…" />
             </div>
+            <div id="board-legend-slot"></div>
             <div class="brain-board" id="brain-board"></div>
             <div class="modal-overlay" id="board-detail-overlay" style="display:none"></div>
           </div>
@@ -1517,33 +1590,115 @@
       review: d.review, result: d.result, tags: d.tags || [], derived: d.derived,
       contributor: d.contributor || null,
       viaStory: !!d.viaStory, viaSlack: !!d.viaSlack, viaChat: !!d.viaChat, viaVantage: !!d.viaVantage,
+      domain: d.domain || "other", parentId: d.parentId || null,
     }));
   }
   /* ============ Memory consolidation — the Company Brain's actual "collective
-     summary" behavior, added 2026-08-30 per the founder's explicit call. Every
-     save path (Ask Cognex, Complete the Story, Slack confirm, Vantage
-     mark-done) now routes its new content through here FIRST instead of
-     always creating a new Decision Memory node: a real Claude call (see
-     live.py's consolidate_memory) decides whether this is really the same
-     topic as an existing node (merge, rewriting that node's summary to
-     reflect everything now known together) or genuinely new (a new node).
-     `draftDecision` is built exactly as before at each call site (same
-     shape, same id scheme) -- this only intercepts what happens to it: on
-     "merge" it's discarded and an EXISTING node is updated in place instead;
-     on "new_node" its title/derived/tags are refined by Claude before it's
-     created, same as before. If the backend/API is unreachable (no
-     ANTHROPIC_API_KEY yet, network issue), this falls back to the exact
-     pre-2026-08-30 behavior -- always create the new node as drafted --
-     the same graceful-degradation pattern already used everywhere else a
-     real Claude call exists in this app, so saving never just fails. */
+     summary" behavior, added 2026-08-30, extended 2026-08-31 into a real
+     department-hub tree per direct founder feedback: "core business
+     departments... stranded into smaller parts over time as the brain of the
+     company grows... consolidate or expand smartly." Every save path (Ask
+     Cognex, Complete the Story, Slack confirm, Vantage mark-done) routes its
+     new content through here FIRST instead of always creating a flat new
+     Decision Memory node. A real Claude call (live.py's consolidate_memory)
+     assigns a broad domain and picks one of four actions:
+       - "merge"      — fold into an existing node in place (unchanged from
+                         2026-08-30's behavior).
+       - "new_branch" — hang a new, sharper child node off an existing trunk
+                         (the "expand" half of the founder's ask).
+       - "new_trunk"  — a genuinely new top-level topic under its domain.
+       - "split"      — an existing node has outgrown itself; a SECOND call
+                         (live.py's plan_memory_split, only made on this rare
+                         path) partitions its full history into 2-4 sharper
+                         children, and the original node is demoted to a
+                         short umbrella "trunk" pointing at them.
+     If any step is unreachable (no ANTHROPIC_API_KEY yet, a network blip),
+     this falls back to the exact pre-2026-08-30 behavior — always create a
+     standalone node as drafted (domain "other", no parent) — the same
+     graceful-degradation pattern used everywhere else a real Claude call
+     exists in this app, so saving never just fails. */
   function consolidateThenSave(company, draftDecision, sourceKind, bodyText, onDone) {
+    function childCountOf(id) {
+      return company.decisions.filter(function (x) { return x.parentId === id; }).length;
+    }
     var candidates = company.decisions.map(function (d) {
-      return { id: d.id, title: d.title, tags: d.tags || [], derived: d.derived || "" };
+      return {
+        id: d.id, title: d.title, tags: d.tags || [], derived: d.derived || "",
+        domain: d.domain || "other", parent_id: d.parentId || null, child_count: childCountOf(d.id),
+      };
     });
+    function whyLineFor(decided, owner) {
+      return "[" + decided + " · " + (owner || "unknown") + " via " + sourceKind + "] " + bodyText;
+    }
     function createAsDrafted() {
+      draftDecision.domain = draftDecision.domain || "other";
       company.decisions.unshift(draftDecision);
       persistNewDecision(company, draftDecision);
       onDone(draftDecision, false);
+    }
+    function attachToExisting(existing, resultTitle, resultSummary, resultTags) {
+      existing.title = resultTitle || existing.title;
+      existing.derived = resultSummary || existing.derived;
+      existing.tags = (existing.tags || []).concat((resultTags || []).filter(function (t) { return (existing.tags || []).indexOf(t) === -1; }));
+      existing.decided = draftDecision.decided;
+      existing.why = (existing.why || []).concat([whyLineFor(draftDecision.decided, draftDecision.owner)]);
+      persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/decisions/" + encodeURIComponent(existing.id), {
+        title: existing.title, derived: existing.derived, tags: existing.tags, why: existing.why, decided: existing.decided,
+      }));
+    }
+    function runSplit(target) {
+      fetch("/api/memory/split_plan", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          target: { id: target.id, title: target.title, tags: target.tags || [], derived: target.derived || "", domain: target.domain || "other", why: target.why || [] },
+          new_content: { title: draftDecision.title, body: bodyText, source_kind: sourceKind, source_persona: draftDecision.owner || "", date: draftDecision.decided },
+        }),
+      }).then(function (res) {
+        if (!res.ok) throw new Error("split plan unavailable (" + res.status + ")");
+        return res.json();
+      }).then(function (plan) {
+        var newWhyLine = whyLineFor(draftDecision.decided, draftDecision.owner);
+        var children = (plan.split_children || []).map(function (c, i) {
+          var why = (c.why_indices || []).map(function (idx) { return (target.why || [])[idx]; }).filter(function (x) { return x != null; });
+          if (i === plan.new_content_child_index) why = why.concat([newWhyLine]);
+          return { id: target.id + "-" + (i + 1), title: c.title, summary: c.summary, tags: c.tags || [], why: why };
+        });
+        fetch("/api/v2/companies/" + company.id + "/decisions/" + encodeURIComponent(target.id) + "/split", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ trunkTitle: plan.trunk_title, trunkSummary: plan.trunk_summary, trunkTags: plan.trunk_tags, children: children }),
+        }).then(function (res2) {
+          if (!res2.ok) throw new Error("split execution failed (" + res2.status + ")");
+          return res2.json();
+        }).then(function (splitResult) {
+          target.title = splitResult.trunk.title;
+          target.derived = splitResult.trunk.derived;
+          target.tags = splitResult.trunk.tags;
+          target.why = [];
+          (splitResult.children || []).forEach(function (c) {
+            company.decisions.unshift({
+              id: c.id, title: c.title, decided: draftDecision.decided, owner: target.owner, visibility: target.visibility,
+              derivedLevel: target.derivedLevel, why: c.why, alternatives: [], assumptions: [], risks: [], review: target.review,
+              result: target.result, tags: c.tags, derived: c.derived, contributor: target.contributor,
+              viaStory: target.viaStory, viaSlack: target.viaSlack, viaChat: target.viaChat, viaVantage: target.viaVantage,
+              domain: target.domain, parentId: target.id,
+            });
+          });
+          var idx = (typeof plan.new_content_child_index === "number") ? plan.new_content_child_index : 0;
+          var attached = company.decisions.filter(function (x) { return x.id === (splitResult.children[idx] || {}).id; })[0] || target;
+          onDone(attached, true);
+        }).catch(function () {
+          // Split PLANNED but executing it (writing the trunk + children) failed --
+          // fall back to a plain merge into the target so the save still lands
+          // somewhere real instead of being silently lost.
+          attachToExisting(target, target.title, target.derived, []);
+          onDone(target, true);
+        });
+      }).catch(function () {
+        // Split PLANNING itself failed (offline/no key/network blip) -- same
+        // fallback: a plain merge into the target.
+        attachToExisting(target, target.title, target.derived, []);
+        onDone(target, true);
+      });
     }
     fetch("/api/memory/consolidate", {
       method: "POST", headers: { "content-type": "application/json" },
@@ -1555,22 +1710,28 @@
       if (!res.ok) throw new Error("consolidate unavailable (" + res.status + ")");
       return res.json();
     }).then(function (result) {
-      if (result.action === "merge" && result.merge_into_id) {
-        var existing = company.decisions.filter(function (x) { return x.id === result.merge_into_id; })[0];
-        if (!existing) { createAsDrafted(); return; } // candidate list came from company.decisions itself, so this shouldn't happen -- defend anyway rather than silently dropping the save
-        existing.title = result.title || existing.title;
-        existing.derived = result.summary || existing.derived;
-        existing.tags = (existing.tags || []).concat((result.tags || []).filter(function (t) { return (existing.tags || []).indexOf(t) === -1; }));
-        existing.decided = draftDecision.decided;
-        existing.why = (existing.why || []).concat(["[" + draftDecision.decided + " · " + (draftDecision.owner || "unknown") + " via " + sourceKind + "] " + bodyText]);
-        persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/decisions/" + encodeURIComponent(existing.id), {
-          title: existing.title, derived: existing.derived, tags: existing.tags, why: existing.why, decided: existing.decided,
-        }));
-        onDone(existing, true);
-      } else {
+      var target = result.target_id ? company.decisions.filter(function (x) { return x.id === result.target_id; })[0] : null;
+      if (result.action === "merge" && target) {
+        attachToExisting(target, result.title, result.summary, result.tags);
+        onDone(target, true);
+      } else if (result.action === "new_branch" && target) {
         draftDecision.title = result.title || draftDecision.title;
         draftDecision.derived = result.summary || draftDecision.derived;
         if (result.tags && result.tags.length) draftDecision.tags = result.tags;
+        draftDecision.domain = target.domain || "other"; // inherit the parent's arc rather than trust a drifted classification
+        draftDecision.parentId = target.id;
+        createAsDrafted();
+      } else if (result.action === "split" && target) {
+        runSplit(target);
+      } else {
+        // "new_trunk", or a target the candidate list didn't actually have
+        // (shouldn't happen -- candidates came from company.decisions itself
+        // -- but defend anyway rather than silently dropping the save).
+        draftDecision.title = result.title || draftDecision.title;
+        draftDecision.derived = result.summary || draftDecision.derived;
+        if (result.tags && result.tags.length) draftDecision.tags = result.tags;
+        draftDecision.domain = result.domain || "other";
+        draftDecision.parentId = null;
         createAsDrafted();
       }
     }).catch(createAsDrafted);
@@ -3699,43 +3860,237 @@
     }).join("");
   }
   /* ============ Company Brain board ============
-     Replaces the old one-card-per-decision grid entirely (2026-08-30, per
-     the founder's explicit call). A radial layout around a central "brain"
-     node, computed in plain percentage coordinates (no pixel measuring, no
+     Redesigned 2026-08-31 into a department-hub tree, per direct founder
+     feedback with a reference screenshot (a skill-wheel UI): "core business
+     departments... stranded into smaller parts over time as the brain of
+     the company grows... consolidate or expand smartly." Six fixed,
+     always-present department sectors (DOMAIN_META below, colors validated
+     with the dataviz skill's palette validator for adjacent-pair
+     colorblind-safety around the full ring, including the wrap-around
+     pair) form a colored ring around the central "brain" — the same
+     always-present scaffolding the reference image's category ring shows,
+     present even before any topic exists in a given department. Within
+     each sector, topics ("trunks") sit right on the ring; as
+     consolidate_memory decides new information is a distinct sub-topic
+     under one (a "new_branch") or an overloaded topic gets split apart
+     (live.py's plan_memory_split), branches radiate further outward —
+     exactly the "stranding into smaller parts" the founder described.
+     Still plain percentage/SVG-viewBox coordinates (no pixel measuring, no
      physics/force-directed layout library) so it stays responsive and
-     dependency-free. Nodes ring outward as the board grows; clicking one
-     opens the exact same detail content the old cards showed (reusing
+     dependency-free, matching the rest of this app. Clicking a node still
+     opens the exact same detail content the old flat board showed (reusing
      decisionSections/sourceBadgeFor/decisionView unchanged — clearance
-     filtering is completely untouched by this redesign, only how it's
-     browsed). "Slightly interactive" per the founder's ask: hover
-     highlights a node's connecting line, click opens full detail, a delete
-     button removes a whole node (the founder's chosen granularity — whole
-     entries only, not editing individual facts within one), and a search
-     box dims non-matching nodes rather than hiding the board's shape. */
-  function layoutBoardNodes(n) {
-    // Concentric rings, each holding more nodes than the last (they have
-    // more circumference to spread across); alternate each ring's starting
-    // angle by a half-step so nodes on adjacent rings don't line up in a
-    // single spoke, which reads as more organic and avoids overlapping
-    // connecting lines. Radii stay comfortably inside the 0-100 viewBox so
-    // nodes (which have real width) never clip the board's edge.
-    var ringCaps = [6, 10, 16, 22, 30];
-    var ringRadii = [17, 28, 37, 44, 47];
-    var positions = [];
-    var idx = 0, ring = 0;
-    while (idx < n) {
-      var cap = ringCaps[Math.min(ring, ringCaps.length - 1)];
-      var rad = ringRadii[Math.min(ring, ringRadii.length - 1)];
-      var count = Math.min(cap, n - idx);
-      var offset = (ring % 2) ? (Math.PI / count) : 0;
-      for (var j = 0; j < count; j++) {
-        var angle = (j / count) * Math.PI * 2 + offset - Math.PI / 2;
-        positions.push({ cx: 50 + rad * Math.cos(angle), cy: 50 + rad * Math.sin(angle) });
-        idx++;
-      }
-      ring++;
+     filtering is completely untouched by this redesign, only how the tree
+     is browsed and laid out). */
+  var DOMAIN_META = [
+    { key: "product", label: "Product", color: "#2a78d6" },
+    { key: "gtm", label: "Go-to-market", color: "#eb6834" },
+    { key: "ops", label: "Operations", color: "#1baf7a" },
+    { key: "pricing", label: "Pricing", color: "#eda100" },
+    { key: "hiring", label: "Hiring & team", color: "#e87ba4" },
+    { key: "other", label: "Other", color: "#008300" },
+  ];
+  function domainMeta(key) {
+    for (var i = 0; i < DOMAIN_META.length; i++) if (DOMAIN_META[i].key === key) return DOMAIN_META[i];
+    return DOMAIN_META[DOMAIN_META.length - 1];
+  }
+  /* A radial "tidy tree": each domain gets an equal fixed sector of the
+     ring; within it, each node's angular span is allocated proportional to
+     1 + its own descendant count, so a topic that's been split into
+     several sharper children visibly fans out wider than one that hasn't —
+     "expand smartly" made visible, not just a data label. Depth increases
+     radius (trunk right on the ring, branches further out), capped so
+     nodes never clip the board's edge. */
+  function layoutBoardTree(decisions) {
+    var byParent = {};
+    decisions.forEach(function (d) {
+      var pid = d.parentId || null;
+      (byParent[pid] = byParent[pid] || []).push(d);
+    });
+    function descendantCount(id) {
+      var kids = byParent[id] || [];
+      var total = kids.length;
+      kids.forEach(function (k) { total += descendantCount(k.id); });
+      return total;
     }
-    return positions;
+    var positions = {};
+    var sectorSpan = (Math.PI * 2) / DOMAIN_META.length;
+    // R0 matches boardRingSvg()'s own ring radius so trunks sit right on
+    // it. RSTEP moves a full "generation" (trunk -> branch -> grandchild)
+    // outward, and also spaces out the extra rings within one generation
+    // (see placeTrunks below). RSAFETY keeps nodes inside the visible
+    // board: the viewBox is 0-100 centered on (50,50), so radius 50 is
+    // already the board's outer edge -- anything larger renders clipped or
+    // off-canvas (a real regression an earlier draft of this fix
+    // introduced by copying a radius cap meant for a differently-scaled
+    // layout).
+    // CHILD_RSAFETY is deliberately looser than the trunk ring's own
+    // RSAFETY: a branch/grandchild box is already smaller than a trunk's
+    // (see the depth-1/2 CSS shrink), and .brain-board has no overflow
+    // clipping, so a rare deep subtree hanging off an already-crowded
+    // trunk is allowed a little more room to breathe before it would
+    // otherwise be forced back to its parent's own radius and reintroduce
+    // the same crowding problem one generation down.
+    var R0 = 27, RSTEP = 15, RSAFETY = 47, CHILD_RSAFETY = 63;
+    // A branch/split parent's own children: a single proportional pass
+    // across the group gives each child its own fixed angular slot
+    // (weighted by 1 + descendant count, so a sub-topic that's grown
+    // fans out wider -- "expand smartly"). In practice a parent here has
+    // at most a small handful of children (new_branch adds one at a
+    // time; split produces exactly two), so one radius for the whole
+    // group is enough -- the crowding problem below is specific to
+    // depth-0 trunks sharing a fixed 60-degree department sector.
+    function placeChildren(nodes, angleStart, angleEnd, baseR, depth) {
+      var span = angleEnd - angleStart;
+      var weights = nodes.map(function (n) { return 1 + descendantCount(n.id); });
+      var total = weights.reduce(function (a, b) { return a + b; }, 0);
+      var cursor = angleStart;
+      nodes.forEach(function (node, i) {
+        var nodeSpan = span * (weights[i] / total);
+        var angle = (cursor + nodeSpan / 2) - Math.PI / 2;
+        positions[node.id] = {
+          cx: 50 + baseR * Math.cos(angle), cy: 50 + baseR * Math.sin(angle),
+          depth: depth, childCount: (byParent[node.id] || []).length, crowded: false,
+        };
+        var kids = byParent[node.id] || [];
+        if (kids.length) placeChildren(kids, cursor, cursor + nodeSpan, Math.min(baseR + RSTEP, CHILD_RSAFETY), depth + 1);
+        cursor += nodeSpan;
+      });
+    }
+    // Domain trunks are a different problem: every un-migrated legacy
+    // decision defaults to "other," so one department sector can end up
+    // holding many more trunks than a single ring around it can hold
+    // without their fixed-width hit boxes touching. Real testing found
+    // two approaches that both looked reasonable on paper still failed:
+    // giving each trunk a bigger radius to compensate for a narrow slice
+    // ran into the board's own edge before it helped, and re-dividing
+    // the full sector span fresh inside each overflow "row" put that
+    // row's lone leftover trunk back at the sector's dead center --
+    // landing it on the exact same angle as an unrelated trunk one ring
+    // in, just closer to the middle. This splits the trunks round-robin
+    // (trunk 0, 3, 6.. / 1, 4, 7.. / 2, 5, 8..) across as many equal-
+    // width rings as needed instead: round-robin, not consecutive
+    // blocks, so two trunks that are ADJACENT in the source list always
+    // land in DIFFERENT rings -- different radius AND, since each ring
+    // divides the full sector independently, a different angle too.
+    // That combination (not angle alone, not radius alone) is what
+    // actually keeps their hit boxes apart.
+    var MAX_PER_RING = 2;
+    function placeTrunks(trunks, sectorStart, sectorEnd) {
+      var span = sectorEnd - sectorStart;
+      var ringCount = Math.max(1, Math.ceil(trunks.length / MAX_PER_RING));
+      // Spread the rings EVENLY across the full R0..RSAFETY radius budget
+      // (rather than a fixed RSTEP-per-ring that a low RSAFETY could
+      // clamp down to almost nothing for an outer ring) so no two rings
+      // ever end up too close together regardless of how many are needed.
+      var ringStep = ringCount > 1 ? (RSAFETY - R0) / (ringCount - 1) : 0;
+      var rings = [];
+      for (var k = 0; k < ringCount; k++) rings.push([]);
+      trunks.forEach(function (t, i) { rings[i % ringCount].push(t); });
+      rings.forEach(function (ringTrunks, k) {
+        var ringR = R0 + k * ringStep;
+        var slice = span / ringTrunks.length;
+        // Stagger each ring's own starting angle by a fraction of its
+        // slice width so a trunk isn't just pushed to a different radius
+        // than its neighbors in adjacent rings, but to a different angle
+        // too -- extra insurance beyond the round-robin assignment above.
+        var cursor = sectorStart + (k * slice) / (ringCount * 2);
+        ringTrunks.forEach(function (node) {
+          var angle = (cursor + slice / 2) - Math.PI / 2;
+          positions[node.id] = {
+            cx: 50 + ringR * Math.cos(angle), cy: 50 + ringR * Math.sin(angle),
+            depth: 0, childCount: (byParent[node.id] || []).length, crowded: ringCount > 1,
+          };
+          var kids = byParent[node.id] || [];
+          if (kids.length) placeChildren(kids, cursor, cursor + slice, Math.min(ringR + RSTEP, CHILD_RSAFETY), 1);
+          cursor += slice;
+        });
+      });
+    }
+    var emptyDomains = [];
+    DOMAIN_META.forEach(function (dm, i) {
+      var trunks = (byParent[null] || []).filter(function (d) { return (d.domain || "other") === dm.key; });
+      var sectorStart = i * sectorSpan, sectorEnd = sectorStart + sectorSpan;
+      if (!trunks.length) {
+        var midAngle = (sectorStart + sectorEnd) / 2 - Math.PI / 2;
+        emptyDomains.push({ domain: dm.key, cx: 50 + R0 * Math.cos(midAngle), cy: 50 + R0 * Math.sin(midAngle) });
+        return;
+      }
+      placeTrunks(trunks, sectorStart, sectorEnd);
+    });
+    // Final safety net: the ring-splitting and staggering above handles
+    // the common cases, but real testing kept finding one more pairing
+    // that still landed too close together -- a trunk against another
+    // trunk two rings out, or a small "crowded" trunk sitting almost
+    // directly under its own much bigger branch child -- each time a
+    // slightly different combination of ring count, phase and depth.
+    // Rather than keep chasing individual pairings with more closed-form
+    // tuning, resolve whatever's left directly: repeatedly find any two
+    // nodes whose boxes would still overlap and nudge the farther-out one
+    // another step outward along its OWN angle (never changing which
+    // angle any node sits at, so a subtree's fan and its connecting lines
+    // still read correctly) until nothing overlaps or a hard iteration
+    // cap is hit. A few passes is enough even for a domain overloaded
+    // with a dozen-plus un-migrated legacy trunks (verified directly).
+    function nodeBoxWidth(pos) {
+      if (pos.crowded) return 60;
+      if (pos.depth === 0) return 116;
+      if (pos.depth === 1) return 92;
+      return 76;
+    }
+    function nodeBoxHeight(pos) { return nodeBoxWidth(pos) * 0.9 + 8; }
+    (function resolveResidualOverlaps() {
+      var ids = Object.keys(positions);
+      var MAX_R = 96;
+      for (var pass = 0; pass < 24; pass++) {
+        var moved = false;
+        for (var i = 0; i < ids.length; i++) {
+          for (var j = i + 1; j < ids.length; j++) {
+            var a = positions[ids[i]], b = positions[ids[j]];
+            var dx = Math.abs(a.cx - b.cx), dy = Math.abs(a.cy - b.cy);
+            var neededX = (nodeBoxWidth(a) + nodeBoxWidth(b)) / 2 / 7.2;
+            var neededY = (nodeBoxHeight(a) + nodeBoxHeight(b)) / 2 / 7.2;
+            if (dx < neededX && dy < neededY) {
+              var ra = Math.hypot(a.cx - 50, a.cy - 50), rb = Math.hypot(b.cx - 50, b.cy - 50);
+              var target = ra >= rb ? a : b;
+              var curR = Math.max(ra, rb);
+              if (curR < MAX_R) {
+                var angle = Math.atan2(target.cy - 50, target.cx - 50);
+                var newR = Math.min(curR + 2, MAX_R);
+                target.cx = 50 + newR * Math.cos(angle);
+                target.cy = 50 + newR * Math.sin(angle);
+                moved = true;
+              }
+            }
+          }
+        }
+        if (!moved) break;
+      }
+    })();
+    return { positions: positions, emptyDomains: emptyDomains };
+  }
+  function boardRingSvg() {
+    // Draws the fixed colored department ring as stroke-dasharray arcs on
+    // one SVG circle per domain, all sharing the tree layout's own R0=30 so
+    // trunk nodes visually sit right on the ring (matching the reference
+    // screenshot). A -90deg group rotation aligns segment 0 to the top,
+    // the same "start at 12 o'clock, go clockwise" convention
+    // layoutBoardTree's own angle math already uses.
+    var n = DOMAIN_META.length, R = 27; // matches layoutBoardTree's own R0
+    var C = 2 * Math.PI * R;
+    var segTotal = C / n;
+    var segLen = Math.max(segTotal - 2.2, 1);
+    var arcs = DOMAIN_META.map(function (dm, i) {
+      return '<circle cx="50" cy="50" r="' + R + '" fill="none" stroke="' + dm.color + '" stroke-width="2.4" ' +
+        'stroke-dasharray="' + segLen.toFixed(2) + ' ' + (C - segLen).toFixed(2) + '" ' +
+        'stroke-dashoffset="' + (-(i * segTotal)).toFixed(2) + '" opacity="0.55"></circle>';
+    }).join("");
+    return '<svg class="board-ring" viewBox="0 0 100 100"><g transform="rotate(-90 50 50)">' + arcs + "</g></svg>";
+  }
+  function boardLegendHtml() {
+    return '<div class="board-legend">' + DOMAIN_META.map(function (dm) {
+      return '<span class="board-legend-item"><span class="board-legend-dot" style="background:' + dm.color + '"></span>' + esc(dm.label) + "</span>";
+    }).join("") + "</div>";
   }
   /* Added 2026-08-31 — direct founder feedback that the board "doesn't
      clearly show what it knows": before this, a node was just an icon and a
@@ -3746,10 +4101,12 @@
      anything about — and says plainly when a topic is restricted, rather
      than silently showing nothing. */
   function boardNodeTooltip(p, d, mode) {
-    if (mode === "none") return "🔒 Restricted — needs " + LEVEL_LABEL[d.visibility] + " clearance to view.";
+    var domLabel = domainMeta(d.domain || "other").label;
+    if (mode === "none") return "🔒 [" + domLabel + "] Restricted — needs " + LEVEL_LABEL[d.visibility] + " clearance to view.";
     var summary = d.derived || (mode === "source" && d.why && d.why[0]) || "";
-    if (!summary) return d.title + " — click to view.";
-    return summary.length > 220 ? summary.slice(0, 220) + "…" : summary;
+    var prefix = "[" + domLabel + "] ";
+    if (!summary) return prefix + d.title + " — click to view.";
+    return prefix + (summary.length > 220 ? summary.slice(0, 220) + "…" : summary);
   }
   function boardNodeIcon(d) {
     if (d.viaStory) return "📝";
@@ -3780,34 +4137,53 @@
     }
     var decisions = company.decisions;
     var countLabel = decisions.length === 1 ? "1 topic" : decisions.length + " topics";
+    var legendEl = document.getElementById("board-legend-slot");
+    if (legendEl) legendEl.innerHTML = boardLegendHtml();
     if (decisions.length === 0) {
-      board.innerHTML = '<div class="brain-core"><span>🧠</span><span class="board-count">0 topics</span></div>' +
-        '<div class="empty-decisions" style="position:absolute;top:64%;left:50%;transform:translateX(-50%);width:78%">Nothing captured yet. Ask Cognex something and save it, or use Complete the Story — new topics will appear here.</div>';
+      board.innerHTML = boardRingSvg() +
+        '<div class="brain-core"><span>🧠</span><span class="board-count">0 topics</span></div>' +
+        '<div class="empty-decisions" style="position:absolute;top:64%;left:50%;transform:translateX(-50%);width:78%">Nothing captured yet. Ask Cognex something and save it, or use Complete the Story — new topics will appear here, sorted into the departments above as the company brain grows.</div>';
       document.querySelectorAll("[data-log-review]").forEach(function (btn) {
         btn.addEventListener("click", function () { logReviewOutcome(btn.getAttribute("data-log-review")); });
       });
       return;
     }
-    var positions = layoutBoardNodes(decisions.length);
-    var linesHtml = decisions.map(function (d, i) {
-      var pos = positions[i];
-      return '<line data-line-for="' + esc(d.id) + '" x1="50" y1="50" x2="' + pos.cx + '" y2="' + pos.cy + '"></line>';
+    var tree = layoutBoardTree(decisions);
+    var positions = tree.positions;
+    var linesHtml = decisions.map(function (d) {
+      if (!d.parentId) return ""; // a trunk connects to its domain arc, not another node -- no line needed
+      var pos = positions[d.id], parentPos = positions[d.parentId];
+      if (!pos || !parentPos) return "";
+      var color = domainMeta(d.domain || "other").color;
+      return '<line data-line-for="' + esc(d.id) + '" x1="' + parentPos.cx + '" y1="' + parentPos.cy + '" x2="' + pos.cx + '" y2="' + pos.cy + '" style="stroke:' + color + '"></line>';
     }).join("");
-    var nodesHtml = decisions.map(function (d, i) {
-      var pos = positions[i];
+    var ghostHtml = tree.emptyDomains.map(function (g) {
+      var dm = domainMeta(g.domain);
+      return '<div class="board-node board-node-ghost" style="left:' + g.cx + '%;top:' + g.cy + '%" title="No ' + esc(dm.label) + ' topics yet — they\'ll appear here as the company brain learns about this area.">' +
+        '<div class="board-node-bubble" style="border-color:' + dm.color + '"></div></div>';
+    }).join("");
+    var nodesHtml = decisions.map(function (d) {
+      var pos = positions[d.id];
+      if (!pos) return ""; // defensive -- shouldn't happen, every decision is placed by layoutBoardTree
       var mode = decisionView(p, d);
       var matches = nodeMatchesBoardQuery(d, ui.boardQuery);
-      var classes = "board-node" + (mode !== "source" ? " locked" : "") + (mode === "derived" ? " derived" : "") +
-        ((mode === "source" && decisionNeedsReview(d)) ? " needs-review" : "") + (matches ? "" : " dimmed");
+      var domKey = d.domain || "other";
+      var classes = "board-node dom-" + domKey + " depth-" + Math.min(pos.depth, 2) +
+        (mode !== "source" ? " locked" : "") + (mode === "derived" ? " derived" : "") +
+        ((mode === "source" && decisionNeedsReview(d)) ? " needs-review" : "") + (matches ? "" : " dimmed") +
+        (pos.crowded ? " crowded" : "");
       var tip = boardNodeTooltip(p, d, mode);
+      var childBadge = pos.childCount > 0 ? '<span class="board-node-children" title="' + pos.childCount + ' sub-topic' + (pos.childCount === 1 ? "" : "s") + '">' + pos.childCount + "</span>" : "";
       return '<div class="' + classes + '" style="left:' + pos.cx + '%;top:' + pos.cy + '%" data-node-id="' + esc(d.id) + '" tabindex="0" title="' + esc(tip) + '">' +
         '<button class="board-node-del" data-del-node="' + esc(d.id) + '" title="Delete this topic" aria-label="Delete this topic">✕</button>' +
+        childBadge +
         '<div class="board-node-bubble">' + boardNodeIcon(d) + '</div>' +
-        '<div class="board-node-title">' + esc(d.title.length > 40 ? d.title.slice(0, 40) + "…" : d.title) + "</div>" +
+        '<div class="board-node-title">' + esc(d.title.length > 36 ? d.title.slice(0, 36) + "…" : d.title) + "</div>" +
         "</div>";
     }).join("");
-    board.innerHTML = '<svg class="board-lines" viewBox="0 0 100 100" preserveAspectRatio="none">' + linesHtml + "</svg>" +
-      '<div class="brain-core"><span>🧠</span><span class="board-count">' + countLabel + '</span></div>' + nodesHtml;
+    board.innerHTML = boardRingSvg() +
+      '<svg class="board-lines" viewBox="0 0 100 100" preserveAspectRatio="none">' + linesHtml + "</svg>" +
+      '<div class="brain-core"><span>🧠</span><span class="board-count">' + countLabel + '</span></div>' + ghostHtml + nodesHtml;
 
     document.querySelectorAll("[data-log-review]").forEach(function (btn) {
       btn.addEventListener("click", function () { logReviewOutcome(btn.getAttribute("data-log-review")); });
@@ -3819,10 +4195,16 @@
       el.addEventListener("mouseenter", function () {
         var line = board.querySelector('[data-line-for="' + CSS.escape(id) + '"]');
         if (line) line.classList.add("hot");
+        var d = decisions.filter(function (x) { return x.id === id; })[0];
+        if (d && d.parentId) {
+          var parentEl = board.querySelector('[data-node-id="' + CSS.escape(d.parentId) + '"]');
+          if (parentEl) parentEl.classList.add("hot-parent");
+        }
       });
       el.addEventListener("mouseleave", function () {
         var line = board.querySelector('[data-line-for="' + CSS.escape(id) + '"]');
         if (line) line.classList.remove("hot");
+        board.querySelectorAll(".hot-parent").forEach(function (x) { x.classList.remove("hot-parent"); });
       });
     });
     document.querySelectorAll("[data-del-node]").forEach(function (btn) {
@@ -3844,6 +4226,16 @@
     var chatTag = d.viaChat ? '<span class="badge badge-chat">Ask Cognex</span>' : "";
     var vantageTag = d.viaVantage ? '<span class="badge badge-type">Vantage</span>' : "";
     var reviewTag = (mode === "source" && decisionNeedsReview(d)) ? ' <span class="badge badge-review">Needs review</span>' : "";
+    var dm = domainMeta(d.domain || "other");
+    var domainTag = '<span class="badge" style="background:' + dm.color + '22;color:' + dm.color + '">' + esc(dm.label) + "</span>";
+    var parent = d.parentId ? company.decisions.filter(function (x) { return x.id === d.parentId; })[0] : null;
+    var children = company.decisions.filter(function (x) { return x.parentId === d.id; });
+    var treeNote = "";
+    if (parent) treeNote += '<div class="board-tree-note">Part of <button class="link-btn" data-open-node="' + esc(parent.id) + '">' + esc(parent.title) + "</button></div>";
+    if (children.length) {
+      treeNote += '<div class="board-tree-note">Split into ' + children.length + " sub-topic" + (children.length === 1 ? "" : "s") + ": " +
+        children.map(function (c) { return '<button class="link-btn" data-open-node="' + esc(c.id) + '">' + esc(c.title) + "</button>"; }).join(", ") + "</div>";
+    }
     var body;
     if (mode === "source") {
       // Added 2026-08-31 — direct founder feedback that a node "doesn't
@@ -3863,8 +4255,9 @@
     overlay.innerHTML = '<div class="modal-card">' +
       '<div class="board-detail-head"><h3>' + esc(d.title) + "</h3>" +
       '<button class="board-detail-close" id="board-detail-close" aria-label="Close">✕</button></div>' +
-      '<div class="board-detail-meta">' + storyTag + slackTag + chatTag + vantageTag + sourceBadgeFor(mode) + reviewTag +
+      '<div class="board-detail-meta">' + domainTag + storyTag + slackTag + chatTag + vantageTag + sourceBadgeFor(mode) + reviewTag +
       '<span>decided ' + esc(d.decided) + '</span><span>owner: ' + esc(d.owner) + '</span><span>needs ' + LEVEL_LABEL[d.visibility] + "</span></div>" +
+      treeNote +
       body +
       '<div class="board-detail-actions"><button class="btn-danger" id="board-detail-delete">Delete this topic</button></div>' +
       "</div>";
@@ -3872,6 +4265,9 @@
     document.getElementById("board-detail-close").addEventListener("click", closeBoardNode);
     overlay.addEventListener("click", function (e) { if (e.target === overlay) closeBoardNode(); });
     document.getElementById("board-detail-delete").addEventListener("click", function () { deleteDecisionNode(d.id); });
+    overlay.querySelectorAll("[data-open-node]").forEach(function (btn) {
+      btn.addEventListener("click", function () { openBoardNode(btn.getAttribute("data-open-node")); });
+    });
   }
   function closeBoardNode() {
     ui.boardOpenNodeId = null;
@@ -3879,14 +4275,35 @@
     overlay.style.display = "none";
     overlay.innerHTML = "";
   }
+  // Collects a node and every descendant beneath it in the tree (its
+  // branches, and their branches) -- mirrors collectGoalSubtreeIds exactly,
+  // since a topic that's been split now has the same "deleting the parent
+  // orphans its children" shape a goal already has.
+  function collectBoardSubtreeIds(company, id) {
+    var byParent = {};
+    company.decisions.forEach(function (d) {
+      var pid = d.parentId || null;
+      (byParent[pid] = byParent[pid] || []).push(d.id);
+    });
+    var ids = [], frontier = [id];
+    while (frontier.length) {
+      var cur = frontier.pop();
+      ids.push(cur);
+      frontier = frontier.concat(byParent[cur] || []);
+    }
+    return ids;
+  }
   function deleteDecisionNode(id) {
     var company = currentCompany();
     var d = company.decisions.filter(function (x) { return x.id === id; })[0];
     if (!d) return;
-    if (!confirm('Delete "' + d.title + '" from the company brain? This removes the whole topic — this can\'t be undone.')) return;
-    company.decisions = company.decisions.filter(function (x) { return x.id !== id; });
+    var subtreeIds = collectBoardSubtreeIds(company, id);
+    var extra = subtreeIds.length - 1;
+    var msg = 'Delete "' + d.title + '" from the company brain' + (extra > 0 ? " and its " + extra + " sub-topic" + (extra === 1 ? "" : "s") : "") + "? This can't be undone.";
+    if (!confirm(msg)) return;
+    company.decisions = company.decisions.filter(function (x) { return subtreeIds.indexOf(x.id) === -1; });
     persistFireAndForget(apiV2("DELETE", "/companies/" + company.id + "/decisions/" + encodeURIComponent(id)));
-    if (ui.boardOpenNodeId === id) closeBoardNode();
+    if (subtreeIds.indexOf(ui.boardOpenNodeId) !== -1) closeBoardNode();
     renderDecisions();
   }
 

@@ -98,6 +98,24 @@ class Decision(Base):
     via_slack: Mapped[bool] = mapped_column(Boolean, default=False)
     via_chat: Mapped[bool] = mapped_column(Boolean, default=False)
     via_vantage: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Added 2026-08-31 for the department-hub Brain Board redesign (direct
+    # founder ask: core business departments that "strand" into smaller,
+    # sharper parts as the company brain grows). `domain` is the broad
+    # knowledge-domain key (one of live.py's fixed DOMAIN_KEYS -- "product",
+    # "gtm", "ops", "pricing", "hiring", "other") that decides which colored
+    # arc of the ring a node sits under. `parent_id` makes a node a "branch"
+    # of another node already on the board (null = a "trunk", attached
+    # directly to its domain's arc) instead of every node sitting in one
+    # flat ring -- populated either by consolidate_memory's "new_branch"
+    # action, or by the split endpoint below when a trunk has absorbed too
+    # many genuinely distinct sub-topics and gets split into sharper
+    # children. Self-referential within the same company -- deliberately
+    # just a plain string column rather than a real FK constraint, matching
+    # how Goal.parent already works one table over, so a parent can be
+    # deleted (cascading to its children, mirroring Goal's own cascading
+    # delete) without fighting a DB-level constraint.
+    domain: Mapped[str] = mapped_column(String, default="other")
+    parent_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(["company_id"], ["companies.id"]),

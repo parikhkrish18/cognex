@@ -110,6 +110,7 @@ def _decision_json(d: Decision) -> dict:
         "why": d.why or [], "alternatives": d.alternatives or [], "assumptions": d.assumptions or [],
         "risks": d.risks or [], "review": d.review, "result": d.result,
         "tags": d.tags or [], "derived": d.derived,
+        "domain": d.domain or "other", "parentId": d.parent_id,
     }
     if d.contributor:
         out["contributor"] = d.contributor
@@ -369,6 +370,13 @@ class DecisionIn(BaseModel):
     viaSlack: bool = False
     viaChat: bool = False
     viaVantage: bool = False
+    # Added 2026-08-31 for the department-hub Brain Board redesign — see
+    # models.py's Decision docstring. `domain` places a new trunk under the
+    # right colored arc; `parentId` (only ever set by the frontend for a
+    # consolidate_memory "new_branch" result) hangs a new node off an
+    # existing one instead of the ring directly.
+    domain: str = "other"
+    parentId: Optional[str] = None
 
 
 @router.post("/companies/{company_id}/decisions")
@@ -383,7 +391,7 @@ def add_decision(company_id: str, req: DecisionIn):
             visibility=req.visibility, derived_level=req.derivedLevel, why=req.why, alternatives=req.alternatives,
             assumptions=req.assumptions, risks=req.risks, review=req.review, result=req.result, tags=req.tags,
             derived=req.derived, contributor=req.contributor, via_story=req.viaStory, via_slack=req.viaSlack,
-            via_chat=req.viaChat, via_vantage=req.viaVantage,
+            via_chat=req.viaChat, via_vantage=req.viaVantage, domain=req.domain or "other", parent_id=req.parentId,
         )
         db.add(d)
         db.commit()
@@ -432,16 +440,97 @@ def update_decision(company_id: str, decision_id: str, req: DecisionUpdateIn):
 def delete_decision(company_id: str, decision_id: str):
     # Added 2026-08-30 for the Brain Board: deleting a whole node off the
     # board (the founder's explicit scope choice — whole entries only, not
-    # individual facts within one). No delete endpoint for a decision
-    # existed before this; every other object in this file already has one
-    # to mirror.
+    # individual facts within one). Extended 2026-08-31, mirroring
+    # delete_goal's own cascading pattern exactly: now that a node can have
+    # children (see models.py's Decision.parent_id), deleting a trunk but
+    # leaving its branches pointing at a parent that no longer exists would
+    # silently orphan them rather than just removing what was asked for.
     with get_session() as db:
         d = db.get(Decision, (company_id, decision_id))
         if not d:
             raise HTTPException(status_code=404, detail="No such decision.")
-        db.delete(d)
+        all_decisions = db.execute(select(Decision).where(Decision.company_id == company_id)).scalars().all()
+        by_parent = {}
+        for other in all_decisions:
+            by_parent.setdefault(other.parent_id, []).append(other)
+        to_delete = []
+        frontier = [d]
+        while frontier:
+            cur = frontier.pop()
+            to_delete.append(cur)
+            frontier.extend(by_parent.get(cur.id, []))
+        deleted_ids = [x.id for x in to_delete]
+        for x in to_delete:
+            db.delete(x)
         db.commit()
-        return {"ok": True}
+        return {"ok": True, "deletedIds": deleted_ids}
+
+
+class SplitChildIn(BaseModel):
+    id: Optional[str] = None
+    title: str
+    summary: str = ""
+    tags: list = []
+    why: list = []
+
+
+class DecisionSplitIn(BaseModel):
+    trunkTitle: Optional[str] = None
+    trunkSummary: Optional[str] = None
+    trunkTags: Optional[list] = None
+    children: list[SplitChildIn]
+
+
+@router.post("/companies/{company_id}/decisions/{decision_id}/split")
+def split_decision(company_id: str, decision_id: str, req: DecisionSplitIn):
+    # Added 2026-08-31 for the Brain Board's "split" consolidation action
+    # (see live.py's plan_memory_split) — a node that's absorbed too many
+    # genuinely distinct sub-topics gets broken apart into 2-4 sharper
+    # children, while the original node itself is demoted to a short
+    # umbrella "trunk" (its detailed why[] history moves into the children;
+    # the trunk keeps only a brief summary of what it now points to).
+    # Deliberately one atomic transaction — a single commit at the end —
+    # so a client never sees the trunk rewritten with its children only
+    # half-created, or vice versa.
+    if not req.children:
+        raise HTTPException(status_code=400, detail="A split needs at least one child node.")
+    with get_session() as db:
+        d = db.get(Decision, (company_id, decision_id))
+        if not d:
+            raise HTTPException(status_code=404, detail="No such decision.")
+        # Splitting an already-split node (one that already has children)
+        # is out of scope for v1 — see the matching guard in live.py's
+        # consolidate_memory. Reject rather than silently reparenting or
+        # double-splitting, which would need deciding which grandchild
+        # subtree absorbs which surviving fact.
+        existing_children = db.execute(select(Decision).where(Decision.company_id == company_id, Decision.parent_id == decision_id)).scalars().all()
+        if existing_children:
+            raise HTTPException(status_code=400, detail="This topic already has sub-topics — split isn't available on an already-split node yet.")
+        existing_ids = {x.id for x in db.execute(select(Decision).where(Decision.company_id == company_id)).scalars().all()}
+        new_rows = []
+        for i, child in enumerate(req.children):
+            cid = child.id or f"{decision_id}-{i + 1}"
+            if cid in existing_ids:
+                cid = f"{cid}-{secrets.token_hex(3)}"
+            existing_ids.add(cid)
+            c = Decision(
+                company_id=company_id, id=cid, title=child.title, decided=d.decided, owner=d.owner,
+                visibility=d.visibility, derived_level=d.derived_level, why=child.why, alternatives=[],
+                assumptions=[], risks=[], review=d.review, result=d.result, tags=child.tags, derived=child.summary,
+                contributor=d.contributor, via_story=d.via_story, via_slack=d.via_slack, via_chat=d.via_chat,
+                via_vantage=d.via_vantage, domain=d.domain, parent_id=decision_id,
+            )
+            db.add(c)
+            new_rows.append(c)
+        if req.trunkTitle is not None:
+            d.title = req.trunkTitle
+        if req.trunkSummary is not None:
+            d.derived = req.trunkSummary
+        if req.trunkTags is not None:
+            d.tags = req.trunkTags
+        d.why = []  # substance moved into the children created above
+        db.commit()
+        return {"trunk": _decision_json(d), "children": [_decision_json(c) for c in new_rows]}
 
 
 # ---------------------------------------------------------------------------
