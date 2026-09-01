@@ -112,7 +112,8 @@
   @media (max-width: 620px) { .features-grid { grid-template-columns: 1fr; } }
   .feature-card { border: 1px solid var(--border-soft); border-radius: 16px; padding: 24px 22px; background: var(--surface); transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease; }
   .feature-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-md); border-color: var(--ink-faint); }
-  .feature-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 17px; margin-bottom: 16px; transition: transform .35s cubic-bezier(.34,1.56,.64,1); }
+  .feature-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; transition: transform .35s cubic-bezier(.34,1.56,.64,1); }
+  .feature-icon svg { display: block; }
   .feature-card:hover .feature-icon { transform: scale(1.12) rotate(-6deg); }
   .feature-card h3 { font-size: 15.5px; margin-bottom: 8px; letter-spacing: -0.01em; }
   .feature-card p { font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; margin: 0; }
@@ -130,7 +131,8 @@
   .org-ask span { font-style: italic; }
   .org-answer { font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; }
   .org-answer .landing-badge { margin-right: 8px; vertical-align: middle; }
-  .org-feature { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-soft); font-size: 11.5px; font-weight: 600; color: var(--accent-ink); text-transform: uppercase; letter-spacing: .02em; }
+  .org-feature { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-soft); font-size: 11.5px; font-weight: 600; color: var(--accent-ink); text-transform: uppercase; letter-spacing: .02em; display: flex; align-items: center; gap: 6px; }
+  .org-feature svg { flex: none; }
   .org-arrow { text-align: center; font-size: 12px; color: var(--ink-faint); padding: 10px 0; }
   .org-note { text-align: center; font-size: 13.5px; color: var(--ink-soft); margin: 28px auto 0; max-width: 560px; line-height: 1.55; }
 
@@ -154,6 +156,47 @@
   @media (prefers-reduced-motion: reduce) {
     .reveal, .reveal-stagger > * { transition: none; opacity: 1; transform: none; }
   }
+
+  /* Scroll-scrubbed card entrance (2026-09-01, direct feedback that the
+     card grids should genuinely move with scroll, not just fade in once).
+     --p (0-1) is driven continuously by initSpiralScroll() as each card
+     crosses the lower half of the viewport -- scrolling back up unwinds it
+     the same way, not a one-shot reveal. --sx/--sr/--sy (start offset/
+     rotation, set inline per card so alternating cards enter from
+     alternating sides) are the only per-card knobs; the curve itself lives
+     here. No transition on transform/opacity: the JS loop already writes a
+     new value every animation frame, so a CSS transition would just add
+     lag on top of an already-smooth update. */
+  .spiral-card {
+    --p: 1;
+    --sy: 46px;
+    opacity: var(--p);
+    transform:
+      translate3d(calc((1 - var(--p)) * var(--sx, 0px)), calc((1 - var(--p)) * var(--sy)), 0)
+      rotate(calc((1 - var(--p)) * var(--sr, 0deg)))
+      scale(calc(0.74 + var(--p) * 0.26));
+    will-change: transform, opacity;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spiral-card { opacity: 1 !important; transform: none !important; }
+  }
+
+  /* Custom pointer (2026-09-01, direct feedback: "a new pointer... very new
+     gen stuff"). A trailing ring + a tighter dot, both mix-blend-mode:
+     difference so they stay visible over any card/background without
+     needing per-section color overrides. Scoped entirely to the landing
+     page: initCustomCursor() only wires up listeners on #landing-shell,
+     so it's automatically inert once the real app (where a custom
+     pointer would just get in the way of real work) is showing instead. */
+  #landing-cursor { position: fixed; top: 0; left: 0; width: 0; height: 0; pointer-events: none; z-index: 9999; }
+  .landing-cursor-ring { position: absolute; top: 0; left: 0; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 1.5px solid var(--ink); border-radius: 50%; opacity: 0; background: transparent; mix-blend-mode: difference; transition: opacity .2s ease, width .25s cubic-bezier(.34,1.56,.64,1), height .25s cubic-bezier(.34,1.56,.64,1), margin .25s cubic-bezier(.34,1.56,.64,1), background .25s ease; }
+  .landing-cursor-dot { position: absolute; top: 0; left: 0; width: 6px; height: 6px; margin: -3px 0 0 -3px; background: var(--ink); border-radius: 50%; opacity: 0; mix-blend-mode: difference; transition: opacity .2s ease; }
+  #landing-cursor.is-active .landing-cursor-ring, #landing-cursor.is-active .landing-cursor-dot { opacity: 1; }
+  #landing-cursor.is-hover .landing-cursor-ring { width: 58px; height: 58px; margin: -29px 0 0 -29px; background: var(--ink); }
+  #landing-cursor.is-hover .landing-cursor-dot { opacity: 0; }
+  #landing-shell.cursor-hidden, #landing-shell.cursor-hidden a, #landing-shell.cursor-hidden button { cursor: none; }
+  @media (pointer: coarse), (hover: none) { #landing-cursor { display: none !important; } }
+  @media (prefers-reduced-motion: reduce) { #landing-cursor { display: none !important; } }
 
   /* Hero: drifting gradient orbs behind the copy + a slow shimmer on the headline gradient */
   .landing-hero { position: relative; overflow: hidden; }
@@ -797,6 +840,7 @@
 
 <!-- ============ Landing page (logged out, before "Login" is clicked) ============ -->
 <div id="landing-shell" style="display:none">
+  <div id="landing-cursor" aria-hidden="true"><div class="landing-cursor-ring"></div><div class="landing-cursor-dot"></div></div>
   <div class="wrap landing-topbar">
     <div class="landing-mark">Cognex</div>
     <nav class="landing-nav-links">
@@ -851,34 +895,34 @@
         <div class="landing-section-eyebrow">What it does</div>
         <h2>One memory. Everything that used to leak out of it, handled.</h2>
       </div>
-      <div class="features-grid reveal-stagger">
-        <div class="feature-card">
-          <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)">🗂</div>
+      <div class="features-grid">
+        <div class="feature-card spiral-card" style="--sx:-64px;--sr:-13deg">
+          <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="6" r="2.3"/><circle cx="12" cy="18" r="2.3"/><line x1="7.9" y1="7.3" x2="10.7" y2="16.1"/><line x1="16.1" y1="7.3" x2="13.3" y2="16.1"/><line x1="8.3" y1="6" x2="15.7" y2="6"/></svg></div>
           <h3>Notes and research, connected</h3>
           <p>Meeting notes, research, and past decisions all live in one place — connected to your company's actual context, not scattered across docs nobody reopens.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:#fff1e0;color:#b45c09">🔁</div>
+        <div class="feature-card spiral-card" style="--sx:64px;--sr:13deg">
+          <div class="feature-icon" style="background:#fff1e0;color:#b45c09"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h13m0 0-4-4m4 4-4 4"/><path d="M20 15H7m0 0 4-4m-4 4 4 4"/></svg></div>
           <h3>Delegate without losing anything</h3>
           <p>Handoffs capture the open threads and reasoning, not just the task — so responsibility actually transfers instead of half-arriving.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:var(--purple-soft);color:var(--purple)">🧭</div>
+        <div class="feature-card spiral-card" style="--sx:-64px;--sr:-13deg">
+          <div class="feature-icon" style="background:var(--purple-soft);color:var(--purple)"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><circle cx="10.5" cy="10.5" r="1.5" fill="currentColor" stroke="none"/><line x1="15.3" y1="15.3" x2="21" y2="21"/></svg></div>
           <h3>An AI that finds the gaps</h3>
           <p>Cognex scans your own goals and decisions, flags what's stalled or unowned, and drafts a next step — real strategy help, not just search.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)">🔐</div>
+        <div class="feature-card spiral-card" style="--sx:64px;--sr:13deg">
+          <div class="feature-icon" style="background:var(--accent-soft);color:var(--accent-ink)"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
           <h3>Chain of command, protected</h3>
           <p>Every layer of the company gets the derived takeaway, never the raw record above their clearance. Structure stays intact as you grow.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:var(--green-soft);color:var(--green)">🎯</div>
+        <div class="feature-card spiral-card" style="--sx:-64px;--sr:-13deg">
+          <div class="feature-icon" style="background:var(--green-soft);color:var(--green)"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="14" width="4" height="7" rx="1"/><rect x="10" y="9" width="4" height="12" rx="1"/><rect x="16.5" y="4" width="4" height="17" rx="1"/></svg></div>
           <h3>Everyone's work ladders up</h3>
           <p>Company goal → department → team → individual. “Why am I doing this” always traces back to real strategy — better organized, by default.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon" style="background:#f5e9fc;color:#7a2fb0">💬</div>
+        <div class="feature-card spiral-card" style="--sx:64px;--sr:13deg">
+          <div class="feature-icon" style="background:#f5e9fc;color:#7a2fb0"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="3"/><path d="M8 16.5l-2.2 4 5.3-4"/></svg></div>
           <h3>Ask Cognex anything</h3>
           <p>A real AI assistant grounded in all of the above — permission-checked before anything reaches it, so the answer is always the right size.</p>
         </div>
@@ -893,45 +937,45 @@
         <h2>If an early Apple had one memory</h2>
         <p>A hypothetical, not a customer story. Four familiar layers of the same company, each asking Cognex something ordinary — and each getting exactly the version of the truth their layer should get.</p>
       </div>
-      <div class="org-example reveal-stagger">
-        <div class="org-card">
+      <div class="org-example">
+        <div class="org-card spiral-card" style="--sx:-80px;--sr:-10deg">
           <div class="org-card-head">
             <div class="org-avatar" style="background:#1d1d1f;color:#fff">SJ</div>
             <div><div class="org-name">Steve Jobs</div><div class="org-title">CEO</div></div>
           </div>
           <div class="org-ask">Asks Cognex: <span>“Why did we really kill the Newton spinoff?”</span></div>
           <div class="org-answer"><span class="landing-badge landing-badge-source">Source access</span>The full debate, the cost case, and the call itself — the complete record, no clearance limits at the top.</div>
-          <div class="org-feature">🗂 Decision Memory</div>
+          <div class="org-feature"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><line x1="7.7" y1="7.1" x2="10.5" y2="16"/><line x1="16.3" y1="7.1" x2="13.5" y2="16"/><line x1="8" y1="6" x2="16" y2="6"/></svg>Decision Memory</div>
         </div>
         <div class="org-arrow">↓ one layer down</div>
-        <div class="org-card">
+        <div class="org-card spiral-card" style="--sx:80px;--sr:10deg">
           <div class="org-card-head">
             <div class="org-avatar" style="background:#e8f0fe;color:#0071e3">SW</div>
             <div><div class="org-name">Steve Wozniak</div><div class="org-title">Co-founder &amp; Chief Engineer</div></div>
           </div>
           <div class="org-ask">Asks Cognex: <span>“What's actually blocking the next Apple II revision?”</span></div>
           <div class="org-answer"><span class="landing-badge landing-badge-derived">Derived context</span>Every open engineering gap Cognex has flagged, each with a suggested next step — pulled straight from goals nobody's closed yet.</div>
-          <div class="org-feature">🧭 Gap-finding</div>
+          <div class="org-feature"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.2"/><circle cx="10.5" cy="10.5" r="1.4" fill="currentColor" stroke="none"/><line x1="15" y1="15" x2="20.5" y2="20.5"/></svg>Gap-finding</div>
         </div>
         <div class="org-arrow">↓ one layer down</div>
-        <div class="org-card">
+        <div class="org-card spiral-card" style="--sx:-80px;--sr:-10deg">
           <div class="org-card-head">
             <div class="org-avatar" style="background:var(--green-soft);color:var(--green)">PM</div>
             <div><div class="org-name">A marketing lead</div><div class="org-title">Product Marketing</div></div>
           </div>
           <div class="org-ask">Asks Cognex: <span>“Why did we price the original Macintosh at $2,495?”</span></div>
           <div class="org-answer"><span class="landing-badge landing-badge-derived">Derived context</span>The reasoning that survives — cost target, positioning, what it needed to compete with — without the raw internal numbers above their clearance.</div>
-          <div class="org-feature">🎯 Goal Alignment</div>
+          <div class="org-feature"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="13" width="3.6" height="7.5" rx="1"/><rect x="10.2" y="8.5" width="3.6" height="12" rx="1"/><rect x="16.9" y="4" width="3.6" height="16.5" rx="1"/></svg>Goal Alignment</div>
         </div>
         <div class="org-arrow">↓ one layer down</div>
-        <div class="org-card">
+        <div class="org-card spiral-card" style="--sx:80px;--sr:10deg">
           <div class="org-card-head">
             <div class="org-avatar" style="background:#f5e9fc;color:#7a2fb0">GB</div>
             <div><div class="org-name">A Genius Bar employee</div><div class="org-title">Apple Store, Retail</div></div>
           </div>
           <div class="org-ask">Asks Cognex: <span>“Can I tell a customer what's coming in the next iPhone?”</span></div>
           <div class="org-answer"><span class="landing-badge landing-badge-restricted">Restricted</span>Nothing about unreleased products — that's above this layer's clearance. Just what's already announced, worded the way Apple wants a customer to hear it.</div>
-          <div class="org-feature">🔐 Chain of command, protected</div>
+          <div class="org-feature"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Chain of command, protected</div>
         </div>
       </div>
       <p class="org-note">Same memory, four correctly-scoped answers — the top gets the full record, everyone below gets exactly enough, and nothing said in confidence has to be re-explained by whoever happened to be in the room.</p>
@@ -953,8 +997,8 @@
         <h2>Plans that grow with your team</h2>
         <p>Every plan includes Decision Memory, Goal Alignment, and Ask Cognex.</p>
       </div>
-      <div class="pricing-grid reveal-stagger">
-        <div class="pricing-card">
+      <div class="pricing-grid">
+        <div class="pricing-card spiral-card" style="--sx:-36px;--sr:-6deg">
           <div class="pricing-name">Starter</div>
           <div class="pricing-price">$19<span>/user/mo</span></div>
           <div class="pricing-sub">For small teams getting their memory started</div>
@@ -967,7 +1011,7 @@
           </ul>
           <button class="btn-secondary btn-block landing-demo-cta">Book a demo</button>
         </div>
-        <div class="pricing-card featured">
+        <div class="pricing-card featured spiral-card" style="--sx:0px;--sy:56px;--sr:0deg">
           <span class="pricing-badge">Most popular</span>
           <div class="pricing-name">Business</div>
           <div class="pricing-price">$39<span>/user/mo</span></div>
@@ -981,7 +1025,7 @@
           </ul>
           <button class="btn-primary btn-block landing-demo-cta">Book a demo</button>
         </div>
-        <div class="pricing-card">
+        <div class="pricing-card spiral-card" style="--sx:36px;--sr:6deg">
           <div class="pricing-name">Enterprise</div>
           <div class="pricing-price">Custom</div>
           <div class="pricing-sub">For organizations with real compliance needs</div>
@@ -5573,6 +5617,112 @@
     targets.forEach(function (el) { io.observe(el); });
   }
   initLandingMotion();
+
+  // Scroll-scrubbed card entrance for the feature/org/pricing grids
+  // (2026-09-01, direct feedback: the reveal-on-scroll above read as too
+  // static -- "cards sliding in in spirals as you scroll" was the ask).
+  // Each .spiral-card's CSS custom property --p (see the CSS block above)
+  // is driven continuously here, not toggled once: a target progress is
+  // computed from the card's real position in the viewport every scroll/
+  // resize event, and a render loop eases the rendered value toward that
+  // target every animation frame -- the same lightweight lerp-toward-
+  // target pattern, just applied to scroll position instead of a mouse
+  // position. Scrolling back up genuinely reverses the motion, since --p
+  // is just wherever the card currently sits in the viewport, not a
+  // one-time flag.
+  function initSpiralScroll() {
+    var cards = Array.prototype.slice.call(document.querySelectorAll(".spiral-card"));
+    if (!cards.length) return;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return; // CSS already pins these to their resting state
+    var state = cards.map(function () { return { target: 1, current: 1 }; });
+    function computeTargets() {
+      var vh = window.innerHeight;
+      cards.forEach(function (card, i) {
+        var rect = card.getBoundingClientRect();
+        if (rect.bottom < -200 || rect.top > vh + 200) return; // far off-screen -- skip the getBoundingClientRect churn, last computed value holds
+        // A card starts easing in once its top crosses ~90% down the
+        // viewport and is fully settled once it crosses ~42% -- so the
+        // motion plays out while it travels through the lower half of the
+        // screen, not all at once right at the edge.
+        var start = vh * 0.9, end = vh * 0.42;
+        state[i].target = Math.max(0, Math.min(1, (start - rect.top) / (start - end)));
+      });
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () { computeTargets(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    computeTargets();
+    // Snap straight to the real starting position for the very first
+    // frame -- otherwise every card (state defaults to target:1/current:1)
+    // would render fully settled for an instant, then visibly animate down
+    // to hidden for anything still below the fold.
+    state.forEach(function (s) { s.current = s.target; });
+    var landing = document.getElementById("landing-shell");
+    function raf() {
+      if (landing && landing.style.display !== "none") {
+        cards.forEach(function (card, i) {
+          var s = state[i];
+          s.current += (s.target - s.current) * 0.16;
+          if (Math.abs(s.target - s.current) < 0.001) s.current = s.target;
+          card.style.setProperty("--p", s.current.toFixed(4));
+        });
+      }
+      requestAnimationFrame(raf);
+    }
+    requestAnimationFrame(raf);
+  }
+  initSpiralScroll();
+
+  // Custom pointer for the landing page only (2026-09-01, direct feedback:
+  // "maybe a new pointer as well... very new gen stuff"). A dot tracks the
+  // real cursor closely; a trailing ring eases toward it more slowly and
+  // blooms over anything clickable -- both listeners are attached to
+  // #landing-shell itself, not window/document, so this is automatically
+  // inert the moment the real app is showing instead (a custom pointer has
+  // no business getting in the way of someone doing real work there).
+  function initCustomCursor() {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (!window.matchMedia || !window.matchMedia("(pointer: fine) and (hover: hover)").matches) return; // touch devices keep their native pointer
+    var landing = document.getElementById("landing-shell");
+    var cursor = document.getElementById("landing-cursor");
+    if (!landing || !cursor) return;
+    var ring = cursor.querySelector(".landing-cursor-ring");
+    var dot = cursor.querySelector(".landing-cursor-dot");
+    var target = { x: -100, y: -100 };
+    var ringPos = { x: -100, y: -100 };
+    var dotPos = { x: -100, y: -100 };
+    landing.addEventListener("mouseenter", function () {
+      cursor.classList.add("is-active");
+      landing.classList.add("cursor-hidden");
+    });
+    landing.addEventListener("mouseleave", function () {
+      cursor.classList.remove("is-active");
+      landing.classList.remove("cursor-hidden");
+    });
+    landing.addEventListener("mousemove", function (e) {
+      target.x = e.clientX; target.y = e.clientY;
+    });
+    landing.addEventListener("mouseover", function (e) {
+      var hoverEl = e.target.closest("a, button, .feature-card, .org-card, .pricing-card, [data-quick], .explainer-toggle-btn");
+      cursor.classList.toggle("is-hover", !!hoverEl);
+    });
+    function raf() {
+      dotPos.x += (target.x - dotPos.x) * 0.35;
+      dotPos.y += (target.y - dotPos.y) * 0.35;
+      ringPos.x += (target.x - ringPos.x) * 0.15;
+      ringPos.y += (target.y - ringPos.y) * 0.15;
+      dot.style.transform = "translate(" + dotPos.x.toFixed(1) + "px," + dotPos.y.toFixed(1) + "px)";
+      ring.style.transform = "translate(" + ringPos.x.toFixed(1) + "px," + ringPos.y.toFixed(1) + "px)";
+      requestAnimationFrame(raf);
+    }
+    requestAnimationFrame(raf);
+  }
+  initCustomCursor();
 
   restoreSession(function () { renderShell(); });
 })();
