@@ -1372,21 +1372,48 @@ def complete_story_questions(req: StoryQuestionsRequest):
 # below) — recursively re-splitting an already-split node means deciding
 # which grandchild subtree absorbs which surviving fact, real complexity
 # not asked for here.
-DOMAIN_KEYS = ["product", "gtm", "ops", "pricing", "hiring", "other"]
-DOMAIN_LABELS = {
-    "product": "Product — what the company builds/sells",
-    "gtm": "Go-to-market — marketing, sales, customer acquisition",
-    "ops": "Operations — supply chain, vendors, day-to-day running of the business",
-    "pricing": "Pricing & unit economics",
-    "hiring": "Hiring & team",
-    "other": "Anything that genuinely doesn't fit the above",
-}
+#
+# Departments used to be a fixed six-value enum baked into this module
+# (product/gtm/ops/pricing/hiring/other) — direct founder feedback
+# (2026-09-01) was that this is backwards: "there are set departments but
+# they haven't been discussed, the company brain should smartly grow using
+# AI and gain new departments as required." So `domain` is now just a
+# free-text string Claude assigns, same as `title`/`summary` — nothing in
+# this file constrains it to a fixed list. To keep the board legible
+# instead of fragmenting into near-duplicate departments ("Marketing" next
+# to "Go-to-market" next to "GTM"), every call is shown the company's
+# CURRENT distinct departments (extracted from the candidate list, see
+# `_normalize_domain` below) and is instructed to reuse one whenever it
+# reasonably fits, copying its exact spelling — a new department name is
+# meant to be rare, not the default. DEFAULT_DOMAIN is only ever a
+# fallback when a real classification genuinely isn't available (the
+# offline/no-API-key path in the frontend, and a defensive default here).
+DEFAULT_DOMAIN = "Other"
+
+
+def _normalize_domain(raw: str, existing_domains: list) -> str:
+    """Claude picks the department name freely now (see the module comment
+    above), which makes accidental fragmentation a real risk: "Product" vs
+    "product" vs "Products" would otherwise render as three separate ring
+    sectors for what a person means as one department. Reuse the EXISTING
+    department's exact spelling whenever the new one matches
+    case-insensitively (a cheap, deterministic backstop underneath the
+    prompt's own "copy the exact spelling" instruction, not a replacement
+    for it), and only fall back to title-casing a fresh all-lowercase name
+    (Claude's own mixed-case names and short acronyms like "R&D" or "GTM"
+    are left exactly as written rather than mangled)."""
+    text = " ".join((raw or "").split()).strip()[:40] or DEFAULT_DOMAIN
+    for existing in existing_domains:
+        if existing.lower() == text.lower():
+            return existing
+    return text.title() if text.islower() else text
+
 
 CONSOLIDATE_MEMORY_SCHEMA = {
     "name": "submit_memory_consolidation",
     "description": (
-        "Assign a broad knowledge domain to newly captured information and decide how it fits onto "
-        "the company's existing Decision Memory tree: fold into an existing node, hang a new sharper "
+        "Assign a broad department/knowledge area to newly captured information and decide how it fits "
+        "onto the company's existing Decision Memory tree: fold into an existing node, hang a new sharper "
         "branch off one, start a new top-level topic, or split an existing node apart."
     ),
     "input_schema": {
@@ -1394,12 +1421,17 @@ CONSOLIDATE_MEMORY_SCHEMA = {
         "properties": {
             "domain": {
                 "type": "string",
-                "enum": DOMAIN_KEYS,
                 "description": (
-                    "The broad knowledge domain this belongs to: "
-                    + "; ".join(f"{k} = {v}" for k, v in DOMAIN_LABELS.items())
-                    + ". For 'merge' or 'split', this SHOULD match the target node's own domain — it is "
-                    "not used to move an already-placed node to a different domain."
+                    "The broad department/knowledge area this belongs to — think of the handful of areas "
+                    "a new hire would need briefing on (Product, Go-to-market, Operations, Pricing, Hiring "
+                    "& Team, Finance, Legal, Partnerships, ...). REUSE one of the company's EXISTING "
+                    "departments listed in the context below whenever it reasonably fits, copying its "
+                    "exact spelling and casing — do not invent 'Marketing' when 'Go-to-market' already "
+                    "exists, or 'product' when 'Product' already exists. Only introduce a genuinely new "
+                    "department name when none of the existing ones are a sensible home for this topic; "
+                    "keep any new name short (1-3 words) and broad, like a real org-chart department, not "
+                    "a narrow topic label. For 'merge' or 'split', this SHOULD match the target node's own "
+                    "domain — it is not used to move an already-placed node to a different domain."
                 ),
             },
             "action": {
@@ -1407,14 +1439,17 @@ CONSOLIDATE_MEMORY_SCHEMA = {
                 "enum": ["new_trunk", "new_branch", "merge", "split"],
                 "description": (
                     "'merge' — really the same topic as an existing node (prefer this whenever there's "
-                    "real overlap). 'new_branch' — a specific, genuinely distinct sub-topic that belongs "
-                    "UNDER an existing trunk/branch (e.g. a specific outreach tactic under an existing "
-                    "broad 'customer acquisition' node) — use this instead of 'merge' when folding it in "
-                    "would blur together things someone would want to see separately, and instead of "
-                    "'new_trunk' when a sensible parent already exists. 'new_trunk' — a genuinely new "
-                    "top-level topic with no existing node in its domain it belongs under. 'split' — an "
-                    "EXISTING node (named as target_id) has accumulated enough genuinely distinct "
-                    "sub-topics that it should be broken apart; only choose this for a node whose "
+                    "real overlap, INCLUDING two saves that are worded differently but are about the same "
+                    "underlying subject — e.g. 'Instagram influencer marketing plan' and 'Instagram "
+                    "influencer outreach strategy' are the same topic and must merge, not sit as two "
+                    "similar-sounding nodes). 'new_branch' — a specific, genuinely distinct sub-topic that "
+                    "belongs UNDER an existing trunk/branch (e.g. a specific outreach tactic under an "
+                    "existing broad 'customer acquisition' node) — use this instead of 'merge' when "
+                    "folding it in would blur together things someone would want to see separately, and "
+                    "instead of 'new_trunk' when a sensible parent already exists. 'new_trunk' — a "
+                    "genuinely new top-level topic with no existing node in its domain it belongs under. "
+                    "'split' — an EXISTING node (named as target_id) has accumulated enough genuinely "
+                    "distinct sub-topics that it should be broken apart; only choose this for a node whose "
                     "child_count is 0 in the candidate list (it has no sub-topics yet)."
                 ),
             },
@@ -1428,7 +1463,14 @@ CONSOLIDATE_MEMORY_SCHEMA = {
             },
             "title": {
                 "type": "string",
-                "description": "A short, clear topic title. Ignored when action is 'split' (see plan_memory_split, which titles the resulting nodes instead).",
+                "description": (
+                    "A short, general topic title describing the durable SUBJECT this is about — e.g. "
+                    "'Instagram influencer marketing strategy' — never a literal copy of the source "
+                    "message's own subject line, chat title, or the exact question someone asked. Two "
+                    "saves about the same underlying subject, worded differently, must end up under the "
+                    "SAME title, not two near-duplicate ones. Ignored when action is 'split' (see "
+                    "plan_memory_split, which titles the resulting nodes instead)."
+                ),
             },
             "summary": {
                 "type": "string",
@@ -1451,19 +1493,35 @@ CONSOLIDATE_MEMORY_SCHEMA = {
 
 def consolidate_memory(candidates: list, new_content: dict) -> dict:
     client = Anthropic()
+    # Existing departments are read directly off the candidates rather than
+    # from any fixed list (see the module comment above) — deduped
+    # case-insensitively but keeping the first-seen spelling, since that's
+    # the exact string every board-open call already needs to reuse
+    # verbatim to avoid fragmenting "Product" from "product".
+    domain_counts: dict = {}
+    existing_domains: list = []
+    for c in candidates:
+        d = (c.get("domain") or DEFAULT_DOMAIN).strip() or DEFAULT_DOMAIN
+        domain_counts[d] = domain_counts.get(d, 0) + 1
+        if d.lower() not in {x.lower() for x in existing_domains}:
+            existing_domains.append(d)
     if candidates:
         cand_lines = [
-            f'- id="{c.get("id","")}" | title="{c.get("title","")}" | domain={c.get("domain","other")} | '
+            f'- id="{c.get("id","")}" | title="{c.get("title","")}" | domain={c.get("domain") or DEFAULT_DOMAIN} | '
             f'parent={c.get("parent_id") or "(none — this is a trunk)"} | child_count={c.get("child_count", 0)} | '
             f'tags={c.get("tags", [])} | current summary: {c.get("derived","") or "(none yet)"}'
             for c in candidates
         ]
         candidates_block = "\n".join(cand_lines)
+        domains_block = "\n".join(
+            f'- "{d}" ({domain_counts[d]} topic{"s" if domain_counts[d] != 1 else ""})' for d in existing_domains
+        )
     else:
         candidates_block = "(the board is empty — this will be the first node)"
+        domains_block = "(none yet — this will be the company brain's first department)"
 
     context = (
-        f"The board currently has {len(candidates)} node(s).\n\n"
+        f"The board currently has {len(candidates)} node(s) across these existing departments:\n{domains_block}\n\n"
         f"Existing Decision Memory nodes (the company's current brain):\n{candidates_block}\n\n"
         "New information just captured:\n"
         f"Source: {new_content.get('source_kind', '')} (by {new_content.get('source_persona', '')} on {new_content.get('date', '')})\n"
@@ -1475,23 +1533,28 @@ def consolidate_memory(candidates: list, new_content: dict) -> dict:
         max_tokens=768,
         system=(
             "You maintain a company's collective knowledge board as a small TREE of broad department "
-            "areas (think of the handful of areas a new hire would need briefing on: the product/what "
-            "the company sells, go-to-market and customer acquisition, operations and supply chain, "
-            "pricing and unit economics, hiring and team, etc.), each of which can grow sharper "
+            "areas — the departments themselves are NOT a fixed list; they grow organically as the "
+            "company's real knowledge grows, the same way a real org chart gains a new department only "
+            "when the work genuinely warrants one, not one per topic. Each department can grow sharper "
             "sub-topic branches over time as real knowledge in that area deepens — NOT a flat pile of "
-            "narrow one-off notes, and not one node per question someone happened to ask.\n\n"
+            "narrow one-off notes, and not one node per question someone happened to ask, and not a new "
+            "department per node either.\n\n"
+            "Reuse an existing department (see the domain field's own instructions) far more often than "
+            "you invent one — a healthy board has a handful of departments, not a dozen near-duplicates. "
             "Default to 'merge' whenever the new information is really about the same topic as an "
             "existing node — a specific instance or detail WITHIN a broader area an existing node "
             "already covers, folded into its summary rather than kept separate just because the exact "
-            "wording wasn't covered before. Reach for 'new_branch' when the new information is a "
-            "genuinely distinct sub-topic that deserves its own node but clearly belongs under an "
-            "existing trunk — this is how a domain's knowledge grows sharper branches over time instead "
-            "of one node trying to cover everything on its own. Only use 'new_trunk' when nothing in "
-            "that domain is a sensible parent at all. Use 'split' only when a listed node's own "
-            "child_count is 0 and merging the new information into it would blur together things that "
-            "genuinely deserve separate nodes — this should be rare; most saves should merge or branch, "
-            "not split. The board should stay small and legible: the more nodes already exist in a "
-            "domain, the harder you should lean toward merge/branch over creating something new."
+            "wording or the exact question wasn't identical to what was covered before; a topic's TITLE "
+            "should read as a durable subject, not a transcript of whatever was asked (see the title "
+            "field's own instructions). Reach for 'new_branch' when the new information is a genuinely "
+            "distinct sub-topic that deserves its own node but clearly belongs under an existing trunk — "
+            "this is how a department's knowledge grows sharper branches over time instead of one node "
+            "trying to cover everything on its own. Only use 'new_trunk' when nothing in that department "
+            "is a sensible parent at all. Use 'split' only when a listed node's own child_count is 0 and "
+            "merging the new information into it would blur together things that genuinely deserve "
+            "separate nodes — this should be rare; most saves should merge or branch, not split. The "
+            "board should stay small and legible: the more nodes already exist in a department, the "
+            "harder you should lean toward merge/branch over creating something new."
         ),
         tools=[CONSOLIDATE_MEMORY_SCHEMA],
         tool_choice={"type": "tool", "name": "submit_memory_consolidation"},
@@ -1519,6 +1582,10 @@ def consolidate_memory(candidates: list, new_content: dict) -> dict:
             elif action == "split" and candidate_by_id.get(result.get("target_id"), {}).get("child_count", 0) > 0:
                 action = "merge"
             result["action"] = action
+            # Departments are free text now (no more fixed enum) -- collapse
+            # accidental case/whitespace variants of an existing department
+            # onto its one true spelling before this ever reaches the board.
+            result["domain"] = _normalize_domain(result.get("domain", ""), existing_domains)
             return result
     raise RuntimeError("Claude did not return the expected submit_memory_consolidation tool call.")
 

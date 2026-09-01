@@ -701,22 +701,33 @@
   .review-banner ul { margin: 6px 0 0; padding-left: 18px; }
   .review-banner li { margin-bottom: 4px; }
 
-  /* ============ Company Brain — Decision Memory board. Redesigned
-     2026-08-31 into a department-hub tree (see the layoutBoardTree/
-     boardRingSvg/DOMAIN_META comment in the JS for the full rationale) --
-     was a flat one-ring layout since 2026-08-30; now a fixed colored ring
-     of department sectors with topics ("trunks") on the ring and
-     sub-topic branches radiating outward as a department's knowledge gets
-     split into sharper parts. Still plain percentage coordinates (an SVG
-     with viewBox="0 0 100 100") rather than a pixel-measuring JS layout
-     library or a physics simulation -- keeps this dependency-free like the
-     rest of the app, and is naturally responsive since percentages scale
-     with the container automatically. Domain colors are the dataviz
-     skill's validated default categorical palette (light-mode contrast/CVD
-     checked with scripts/validate_palette.js, including the ring's
-     wrap-around adjacent pair since it's a closed circle, not a bar chart's
-     open line) -- this app has no dark mode, so only the light steps are
-     used. ============ */
+  /* ============ Company Brain board (was "Decision Memory" in the nav --
+     renamed 2026-09-01 per direct founder feedback). Redesigned 2026-08-31
+     into a department-hub tree (see the layoutBoardTree/boardRingSvg/
+     computeDomainMeta comment in the JS for the full rationale); departments
+     were a fixed six-value list until 2026-09-01, when direct founder
+     feedback ("the company brain should smartly grow using AI and gain new
+     departments as required") made them fully dynamic -- computed fresh
+     from whatever's actually on the board, never a hardcoded set. Topics
+     ("trunks") sit on the ring and sub-topic branches radiate outward as a
+     department's knowledge gets split into sharper parts. Still plain
+     percentage coordinates (an SVG with viewBox="0 0 100 100") rather than
+     a pixel-measuring JS layout library or a physics simulation -- keeps
+     this dependency-free like the rest of the app, and is naturally
+     responsive since percentages scale with the container automatically.
+     Domain colors are the dataviz skill's validated 8-slot categorical
+     palette (contrast/CVD-checked with scripts/validate_palette.js,
+     including the ring's own circular wrap-around adjacent pair since it's
+     a closed circle, not a bar chart's open line) -- this app has no dark
+     mode, so only the light steps are used. `.brain-board` clips
+     (`overflow: hidden`) as a hard backstop: direct founder feedback
+     ("the topics are going out of the page") traced back to two radius
+     constants in layoutBoardTree that already computed positions past the
+     viewBox's own visible edge -- those are fixed at the source (see that
+     function's own comment), and this clip means even an unforeseen future
+     edge case fails safely (a node quietly clipped at the board's own
+     edge) instead of visibly spilling into the page above/below it again.
+     ============ */
   .board-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
   .board-title { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
   .board-sub { font-size: 13px; color: var(--ink-faint); margin-top: 3px; max-width: 52ch; }
@@ -725,34 +736,58 @@
   /* A legend row for the ring's colors, per the dataviz skill's rule that
      identity is never carried by color alone -- each domain also has a
      text label here (and inside every node's own hover tooltip/detail
-     badge), never just a colored dot on its own. */
+     badge), never just a colored dot on its own. Also a hover trigger of
+     its own now (see setHotDomain in the JS) -- part of the "hover a
+     section, it and its strands pop" interaction. */
   .board-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 2px; font-size: 12px; color: var(--ink-soft); }
-  .board-legend-item { display: inline-flex; align-items: center; gap: 6px; }
-  .board-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-  .brain-board { position: relative; width: 100%; max-width: 720px; aspect-ratio: 1; margin: 12px auto 4px; }
-  .board-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .board-legend-item { display: inline-flex; align-items: center; gap: 6px; cursor: default; border-radius: 999px; padding: 2px 8px 2px 4px; margin: -2px -8px -2px -4px; transition: background-color .18s ease, color .18s ease; }
+  .board-legend-item.is-hot { background: var(--surface-2); color: var(--ink); font-weight: 600; }
+  .board-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; transition: transform .18s ease; }
+  .board-legend-item.is-hot .board-legend-dot { transform: scale(1.35); }
+  .brain-board { position: relative; width: 100%; max-width: 720px; aspect-ratio: 1; margin: 12px auto 4px; overflow: hidden; }
+  .board-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  /* One <g class="board-sector"> per department (see boardRingSvg): a fat
+     transparent hit-stroke plus the real visible arc, both sharing the
+     same dasharray geometry so the hit target lines up exactly under the
+     thin visible one. Hovering pops that one arc outward around the
+     shared (50,50) center -- the ring segment "growing" the founder asked
+     for, styled after the Watch Dogs: Legion reference screenshot -- and
+     setHotDomain (JS) fans the same highlight out to the sector's own
+     nodes and legend row. */
+  .board-sector-hit { cursor: pointer; }
+  .board-sector-arc { transform-box: fill-box; transform-origin: 50% 50%; transition: stroke-width .22s cubic-bezier(.2,.8,.2,1), opacity .22s ease, transform .22s cubic-bezier(.2,.8,.2,1); }
+  .board-sector:hover .board-sector-arc, .board-sector.is-hot .board-sector-arc { stroke-width: 4.6; opacity: 1; transform: scale(1.045); }
   .board-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
   .board-lines line { stroke-width: 0.4; opacity: 0.55; transition: stroke-width .15s ease, opacity .15s ease; }
   .board-lines line.hot { stroke: var(--accent-ink) !important; stroke-width: 0.75; opacity: 1; }
-  .brain-core { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 92px; height: 92px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, var(--accent-soft), var(--surface-2)); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 0 0 7px var(--surface), 0 6px 20px rgba(0,0,0,0.08); font-size: 30px; z-index: 2; animation: brainPulse 3.6s ease-in-out infinite; }
-  .brain-core .board-count { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); margin-top: 3px; letter-spacing: .01em; }
+  .brain-core { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 92px; height: 92px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, var(--accent-soft), var(--surface-2)); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 0 0 7px var(--surface), 0 6px 20px rgba(0,0,0,0.08); color: var(--accent-ink); z-index: 2; animation: brainPulse 3.6s ease-in-out infinite; }
+  .brain-core-icon { display: flex; }
+  .brain-core .board-count { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); margin-top: 5px; letter-spacing: .01em; }
   @keyframes brainPulse { 0%, 100% { box-shadow: 0 0 0 7px var(--surface), 0 6px 20px rgba(0,0,0,0.08); } 50% { box-shadow: 0 0 0 10px var(--surface), 0 8px 28px rgba(0,113,227,0.16); } }
-  .board-node { position: absolute; transform: translate(-50%, -50%); width: 116px; text-align: center; cursor: pointer; z-index: 1; transition: transform .15s ease, opacity .15s ease; }
+  .board-node { position: absolute; transform: translate(-50%, -50%); width: 116px; text-align: center; cursor: pointer; z-index: 1; transition: transform .18s cubic-bezier(.2,.8,.2,1), opacity .18s ease; }
   .board-node:hover, .board-node:focus-visible, .board-node.hot-parent { transform: translate(-50%, -50%) scale(1.07); z-index: 3; }
   .board-node.dimmed { opacity: 0.22; }
-  .board-node-bubble { width: 62px; height: 62px; margin: 0 auto 6px; border-radius: 50%; background: var(--surface); border: 2.5px solid var(--border-soft); display: flex; align-items: center; justify-content: center; font-size: 21px; position: relative; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-  /* Domain color owns the border on an ordinary (fully-visible) node --
-     the second, distinct encoding channel from clearance state below, per
-     the dataviz skill's "color follows identity, never collides with a
-     different meaning on the same channel" rule. Declared BEFORE
-     .locked/.derived so those two still win by source order when a node
-     is also restricted -- clearance state is the more urgent signal. */
-  .board-node.dom-product .board-node-bubble { border-color: #2a78d6; }
-  .board-node.dom-gtm .board-node-bubble { border-color: #eb6834; }
-  .board-node.dom-ops .board-node-bubble { border-color: #1baf7a; }
-  .board-node.dom-pricing .board-node-bubble { border-color: #eda100; }
-  .board-node.dom-hiring .board-node-bubble { border-color: #e87ba4; }
-  .board-node.dom-other .board-node-bubble { border-color: #008300; }
+  /* Watch Dogs: Legion-style focus, driven by setHotDomain (JS): the
+     hovered department's own nodes pop a little larger and glow in its
+     color; every other node on the board recedes -- the same "hovered
+     category reads as one connected group, everything else steps back"
+     behavior the reference skill-wheel screenshot showed, extended from
+     the ring down into the nodes themselves. */
+  .has-hot-domain .board-node:not(.dom-hot) { opacity: 0.32; transform: translate(-50%, -50%) scale(0.96); }
+  .board-node.dom-hot { transform: translate(-50%, -50%) scale(1.1); z-index: 3; }
+  .board-node.dom-hot .board-node-bubble { box-shadow: 0 0 0 5px color-mix(in srgb, var(--dom-color) 22%, transparent), 0 4px 14px rgba(0,0,0,0.12); }
+  .board-node-bubble { width: 62px; height: 62px; margin: 0 auto 6px; border-radius: 50%; background: var(--surface); border: 2.5px solid var(--dom-color, var(--border-soft)); display: flex; align-items: center; justify-content: center; font-size: 21px; position: relative; box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: box-shadow .2s ease; }
+  /* Domain color owns the border on an ordinary (fully-visible) node, via
+     the --dom-color custom property set per-node inline (departments are
+     now free-text AI-assigned names -- see computeDomainMeta -- so a fixed
+     CSS class per domain no longer makes sense the way it did for the old
+     six-value enum). This is the second, distinct encoding channel from
+     clearance state below, per the dataviz skill's "color follows
+     identity, never collides with a different meaning on the same
+     channel" rule -- .locked/.derived below still win on specificity
+     (two classes beat the base rule's custom property) regardless of
+     which color --dom-color happens to hold, so clearance state stays the
+     more urgent signal exactly as before. */
   .board-node.locked .board-node-bubble { border-color: var(--red); opacity: 0.6; }
   .board-node.derived .board-node-bubble { border-color: var(--accent-ink); }
   .board-node.needs-review .board-node-bubble::after { content: ""; position: absolute; top: -2px; right: -2px; width: 12px; height: 12px; border-radius: 50%; background: #ff9500; border: 2px solid var(--surface); }
@@ -785,7 +820,15 @@
   .board-node.crowded { width: 60px; }
   .board-node.crowded .board-node-bubble { width: 34px; height: 34px; font-size: 13px; }
   .board-node.crowded .board-node-title { font-size: 9px; }
-  .board-node-title { font-size: 11.5px; font-weight: 600; color: var(--ink); line-height: 1.25; }
+  /* Hard-clamped to 2 lines. Direct founder feedback ("the topics are
+     going out of the page") traced partly to titles that could wrap to 3+
+     lines with nothing capping how tall that made a node's rendered box --
+     layoutBoardTree's own overlap math only ever estimated 2 lines' worth
+     of height (see its nodeBoxHeight), so an unclamped 3rd line silently
+     overlapped whatever sat below it. The per-depth truncation budget in
+     renderDecisions (titleBudget) keeps most titles from ever needing this
+     clamp to kick in and cut a word off mid-sentence. */
+  .board-node-title { font-size: 11.5px; font-weight: 600; color: var(--ink); line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   /* z-index matters here, not just cosmetically: this button sits earlier
      in the DOM than .board-node-bubble, so without it the bubble (auto
      stacking, painted later) sits on top and silently eats its clicks --
@@ -796,12 +839,6 @@
   .board-node:hover .board-node-del { opacity: 1; }
   .board-node-del:hover { color: var(--red); }
   .board-node-children { position: absolute; top: -3px; left: 30px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px; background: var(--ink); color: var(--surface); font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center; box-shadow: 0 0 0 2px var(--surface); }
-  /* An empty department "slot" -- the fixed scaffolding the founder asked
-     for, visible before any topic exists there so a company can see where
-     Pricing (say) will grow in, not just where it already has. Deliberately
-     not interactive: there's no real record behind it, only a tooltip. */
-  .board-node-ghost { pointer-events: auto; cursor: default; opacity: 0.4; }
-  .board-node-ghost .board-node-bubble { background: transparent; border-style: dashed; border-width: 2px; width: 34px; height: 34px; box-shadow: none; }
   .board-tree-note { font-size: 12.5px; color: var(--ink-faint); margin: 2px 0 10px; }
   .board-tree-note .link-btn { font-size: 12.5px; }
   .board-detail-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; }
@@ -1170,7 +1207,7 @@
 
       <div class="nav-section-label">Workspace</div>
       <div class="nav-workspace" id="tabs">
-        <button class="tab-btn nav-item" data-tab="decisions"><span class="ic">🗂</span> Decision Memory</button>
+        <button class="tab-btn nav-item" data-tab="decisions"><span class="ic">🗂</span> Company Brain</button>
         <button class="tab-btn nav-item" data-tab="goals"><span class="ic">🎯</span> Goal Alignment</button>
         <button class="tab-btn nav-item" data-tab="story"><span class="ic">✍️</span> Complete the Story</button>
         <button class="tab-btn nav-item" data-tab="tree"><span class="ic">🌳</span> Company Tree</button>
@@ -3940,36 +3977,92 @@
      Redesigned 2026-08-31 into a department-hub tree, per direct founder
      feedback with a reference screenshot (a skill-wheel UI): "core business
      departments... stranded into smaller parts over time as the brain of
-     the company grows... consolidate or expand smartly." Six fixed,
-     always-present department sectors (DOMAIN_META below, colors validated
-     with the dataviz skill's palette validator for adjacent-pair
-     colorblind-safety around the full ring, including the wrap-around
-     pair) form a colored ring around the central "brain" — the same
-     always-present scaffolding the reference image's category ring shows,
-     present even before any topic exists in a given department. Within
-     each sector, topics ("trunks") sit right on the ring; as
-     consolidate_memory decides new information is a distinct sub-topic
-     under one (a "new_branch") or an overloaded topic gets split apart
-     (live.py's plan_memory_split), branches radiate further outward —
-     exactly the "stranding into smaller parts" the founder described.
+     the company grows... consolidate or expand smartly." Department
+     sectors form a colored ring around the central "brain." Within each
+     sector, topics ("trunks") sit right on the ring; as consolidate_memory
+     decides new information is a distinct sub-topic under one (a
+     "new_branch") or an overloaded topic gets split apart (live.py's
+     plan_memory_split), branches radiate further outward — exactly the
+     "stranding into smaller parts" the founder described.
+     Extended 2026-09-01, two more rounds of direct founder feedback: (1)
+     departments were originally a fixed six-value list, always drawn even
+     empty — "there are set departments but they haven't been discussed,
+     the company brain should smartly grow using AI and gain new
+     departments as required," so sectors are now computed fresh from
+     whatever departments actually exist on the board (computeDomainMeta
+     below) and a brand-new company starts with zero sectors, gaining its
+     first the moment its first topic is saved; and (2) "the UI interaction
+     should be like that watchdogs skillset tree so as I hover over the
+     sections and strands it should get bigger/smaller, move along etc" —
+     see boardRingSvg's own comment for the hover mechanics that added.
      Still plain percentage/SVG-viewBox coordinates (no pixel measuring, no
      physics/force-directed layout library) so it stays responsive and
      dependency-free, matching the rest of this app. Clicking a node still
      opens the exact same detail content the old flat board showed (reusing
      decisionSections/sourceBadgeFor/decisionView unchanged — clearance
      filtering is completely untouched by this redesign, only how the tree
-     is browsed and laid out). */
-  var DOMAIN_META = [
-    { key: "product", label: "Product", color: "#2a78d6" },
-    { key: "gtm", label: "Go-to-market", color: "#eb6834" },
-    { key: "ops", label: "Operations", color: "#1baf7a" },
-    { key: "pricing", label: "Pricing", color: "#eda100" },
-    { key: "hiring", label: "Hiring & team", color: "#e87ba4" },
-    { key: "other", label: "Other", color: "#008300" },
-  ];
+     is browsed, laid out, and hovered). */
+  /* Departments used to be a fixed six-slot list here. Direct founder
+     feedback (2026-09-01): "there are set departments but they haven't
+     been discussed, the company brain should smartly grow using AI and
+     gain new departments as required." So the ring's sectors are no
+     longer a static array -- they're computed fresh from whatever
+     departments actually exist on the current board (see
+     live.py's consolidate_memory / _normalize_domain for how a topic's
+     `domain` string gets assigned and kept from fragmenting into
+     near-duplicates like "Product" vs "product"). A brand-new company
+     starts with ZERO sectors and gains its first the moment its first
+     topic is saved -- there's no more pre-drawn "Pricing" ghost slot
+     sitting empty before the company has ever discussed pricing.
+     Colors still come from the dataviz skill's validated 8-hue
+     categorical order (re-validated for this exact use, including the
+     ring's own circular wrap-around adjacency, since a ring is a closed
+     loop unlike a bar chart's open line) -- assigned by each department's
+     position in a stable alphabetical sort, not creation order, so a
+     department's color never shifts around just because the person
+     looking reloaded the board at a different moment. */
+  var DOMAIN_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+  // The six legacy fixed-department keys (pre-2026-09-01) are short lowercase
+  // codes with no spaces -- title-casing "gtm" naively gives "Gtm", not
+  // "Go-to-market". Kept only so old data still reads the way it always
+  // has; every NEW department is whatever readable name the AI assigned
+  // (or a person typed), shown as-is.
+  var LEGACY_DOMAIN_LABELS = { product: "Product", gtm: "Go-to-market", ops: "Operations", pricing: "Pricing", hiring: "Hiring & team", other: "Other" };
+  function prettyDomainLabel(key) {
+    var legacy = LEGACY_DOMAIN_LABELS[(key || "").toLowerCase()];
+    if (legacy) return legacy;
+    if (key && key === key.toLowerCase()) {
+      return key.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    }
+    return key || "Other";
+  }
+  /* Computed once per render (see renderDecisions) from whatever's
+     actually on the board right now -- every other function in this file
+     that needs a department's color/label takes this list as a parameter,
+     except domainMeta() below, which lazily recomputes it from the current
+     company for the handful of call sites (opening a node's detail modal,
+     a hover tooltip) that run outside a render pass. */
+  function computeDomainMeta(decisions) {
+    var seen = {};
+    (decisions || []).forEach(function (d) {
+      var key = (d.domain || "Other").trim() || "Other";
+      seen[key] = true;
+    });
+    var keys = Object.keys(seen).sort(function (a, b) { return a.localeCompare(b); });
+    return keys.map(function (key, i) {
+      return { key: key, label: prettyDomainLabel(key), color: DOMAIN_PALETTE[i % DOMAIN_PALETTE.length] };
+    });
+  }
   function domainMeta(key) {
-    for (var i = 0; i < DOMAIN_META.length; i++) if (DOMAIN_META[i].key === key) return DOMAIN_META[i];
-    return DOMAIN_META[DOMAIN_META.length - 1];
+    var company = currentCompany();
+    var list = computeDomainMeta(company ? company.decisions : []);
+    for (var i = 0; i < list.length; i++) if (list[i].key === key) return list[i];
+    // A domain not currently present on the board (shouldn't normally
+    // happen -- every caller derives the key from a real decision) still
+    // gets a real color rather than crashing, picked the same
+    // alphabetical-position way computeDomainMeta itself would.
+    var idx = list.length;
+    return { key: key || "Other", label: prettyDomainLabel(key), color: DOMAIN_PALETTE[idx % DOMAIN_PALETTE.length] };
   }
   /* A radial "tidy tree": each domain gets an equal fixed sector of the
      ring; within it, each node's angular span is allocated proportional to
@@ -3978,7 +4071,7 @@
      "expand smartly" made visible, not just a data label. Depth increases
      radius (trunk right on the ring, branches further out), capped so
      nodes never clip the board's edge. */
-  function layoutBoardTree(decisions) {
+  function layoutBoardTree(decisions, domainMetaList) {
     var byParent = {};
     decisions.forEach(function (d) {
       var pid = d.parentId || null;
@@ -3991,24 +4084,25 @@
       return total;
     }
     var positions = {};
-    var sectorSpan = (Math.PI * 2) / DOMAIN_META.length;
+    var sectorSpan = (Math.PI * 2) / Math.max(domainMetaList.length, 1);
     // R0 matches boardRingSvg()'s own ring radius so trunks sit right on
     // it. RSTEP moves a full "generation" (trunk -> branch -> grandchild)
     // outward, and also spaces out the extra rings within one generation
-    // (see placeTrunks below). RSAFETY keeps nodes inside the visible
-    // board: the viewBox is 0-100 centered on (50,50), so radius 50 is
-    // already the board's outer edge -- anything larger renders clipped or
-    // off-canvas (a real regression an earlier draft of this fix
-    // introduced by copying a radius cap meant for a differently-scaled
-    // layout).
-    // CHILD_RSAFETY is deliberately looser than the trunk ring's own
-    // RSAFETY: a branch/grandchild box is already smaller than a trunk's
-    // (see the depth-1/2 CSS shrink), and .brain-board has no overflow
-    // clipping, so a rare deep subtree hanging off an already-crowded
-    // trunk is allowed a little more room to breathe before it would
-    // otherwise be forced back to its parent's own radius and reintroduce
-    // the same crowding problem one generation down.
-    var R0 = 27, RSTEP = 15, RSAFETY = 47, CHILD_RSAFETY = 63;
+    // (see placeTrunks below).
+    //
+    // RSAFETY/CHILD_RSAFETY/MAX_R (below, in resolveResidualOverlaps) all
+    // keep nodes inside the visible board: the viewBox is 0-100 centered
+    // on (50,50), so radius 50 is already the board's outer edge -- and
+    // .brain-board has no overflow clipping of its own, so anything placed
+    // past radius ~50 doesn't just clip, it visibly spills out of the
+    // circle into whatever content sits above/below it on the page. A
+    // prior version of this fix set CHILD_RSAFETY to 63 and the overlap
+    // resolver's own cap to 96 -- both already past the visible edge on
+    // paper, and exactly what direct founder feedback ("the topics are
+    // going out of the page") was actually seeing once a crowded domain's
+    // resolver needed a few outward nudges. Every radius budget below is
+    // now deliberately capped under 50.
+    var R0 = 27, RSTEP = 13, RSAFETY = 44, CHILD_RSAFETY = 46;
     // A branch/split parent's own children: a single proportional pass
     // across the group gives each child its own fixed angular slot
     // (weighted by 1 + descendant count, so a sub-topic that's grown
@@ -4052,7 +4146,19 @@
     // divides the full sector independently, a different angle too.
     // That combination (not angle alone, not radius alone) is what
     // actually keeps their hit boxes apart.
-    var MAX_PER_RING = 2;
+    //
+    // Raised from 2 to 4 on 2026-09-01 alongside making departments
+    // dynamic (see computeDomainMeta): with real AI-assigned departments
+    // reusing an existing one by default rather than fragmenting into new
+    // ones, a healthy board naturally lands MORE trunks in each of FEWER
+    // departments than the old six-way fixed split did. 2-per-ring needed
+    // 6 rings to hold a dozen trunks in the R0..RSAFETY radius budget --
+    // rings only ~3 units apart, tighter than a trunk bubble's own
+    // radius, which is what was actually producing the crowded, hard-to-
+    // read overlap visible even after the resolveResidualOverlaps
+    // safety-net kicked in. 4-per-ring needs only 3 rings for the same
+    // dozen, giving each ring roughly a bubble's-width of breathing room.
+    var MAX_PER_RING = 4;
     function placeTrunks(trunks, sectorStart, sectorEnd) {
       var span = sectorEnd - sectorStart;
       var ringCount = Math.max(1, Math.ceil(trunks.length / MAX_PER_RING));
@@ -4084,15 +4190,14 @@
         });
       });
     }
-    var emptyDomains = [];
-    DOMAIN_META.forEach(function (dm, i) {
-      var trunks = (byParent[null] || []).filter(function (d) { return (d.domain || "other") === dm.key; });
+    // Sectors are only ever drawn for departments that actually have a
+    // topic (see computeDomainMeta) -- departments "grow as required" now,
+    // so there's no fixed list to loop over and no permanently-empty ghost
+    // slot to place.
+    domainMetaList.forEach(function (dm, i) {
+      var trunks = (byParent[null] || []).filter(function (d) { return ((d.domain || "Other").trim() || "Other") === dm.key; });
+      if (!trunks.length) return;
       var sectorStart = i * sectorSpan, sectorEnd = sectorStart + sectorSpan;
-      if (!trunks.length) {
-        var midAngle = (sectorStart + sectorEnd) / 2 - Math.PI / 2;
-        emptyDomains.push({ domain: dm.key, cx: 50 + R0 * Math.cos(midAngle), cy: 50 + R0 * Math.sin(midAngle) });
-        return;
-      }
       placeTrunks(trunks, sectorStart, sectorEnd);
     });
     // Final safety net: the ring-splitting and staggering above handles
@@ -4115,10 +4220,17 @@
       if (pos.depth === 1) return 92;
       return 76;
     }
-    function nodeBoxHeight(pos) { return nodeBoxWidth(pos) * 0.9 + 8; }
+    // The title under a node's bubble is now hard-clamped to 2 lines in CSS
+    // (.board-node-title's -webkit-line-clamp -- see the matching style
+    // rule), so this estimate can finally match what actually renders
+    // instead of guessing: a real 3rd line of wrapped text used to render
+    // silently past this box's own estimated height, which is exactly what
+    // let two nodes visually overlap even though the overlap resolver
+    // below believed they'd cleared each other.
+    function nodeBoxHeight(pos) { return nodeBoxWidth(pos) * 0.9 + 26; }
     (function resolveResidualOverlaps() {
       var ids = Object.keys(positions);
-      var MAX_R = 96;
+      var MAX_R = 46;
       for (var pass = 0; pass < 24; pass++) {
         var moved = false;
         for (var i = 0; i < ids.length; i++) {
@@ -4144,29 +4256,44 @@
         if (!moved) break;
       }
     })();
-    return { positions: positions, emptyDomains: emptyDomains };
+    return { positions: positions };
   }
-  function boardRingSvg() {
-    // Draws the fixed colored department ring as stroke-dasharray arcs on
-    // one SVG circle per domain, all sharing the tree layout's own R0=30 so
-    // trunk nodes visually sit right on the ring (matching the reference
-    // screenshot). A -90deg group rotation aligns segment 0 to the top,
-    // the same "start at 12 o'clock, go clockwise" convention
-    // layoutBoardTree's own angle math already uses.
-    var n = DOMAIN_META.length, R = 27; // matches layoutBoardTree's own R0
+  /* Hoverable, high-tech ring — direct founder feedback (2026-09-01): "the
+     UI interaction should be like that watchdogs skillset tree so as I
+     hover over the sections and strands it should get bigger/smaller,
+     move along etc." Each department is its own <g class="board-sector">
+     holding two circles sharing the same geometry: a fat, fully
+     transparent "hit" stroke (a comfortable hover target — the visible
+     arc's own 2.4px stroke would be a hair-trigger sliver to aim at) and
+     the real visible arc on top of it. Hovering the group (CSS :hover,
+     no JS needed for the arc's own pop) grows and brightens that one
+     sector via a transform scaled from the shared (50,50) center — see
+     the matching .board-sector:hover rule — while board-level JS (see
+     setHotDomain in renderDecisions) fans that same highlight out to
+     every node that belongs to the department, exactly the reference
+     skill-wheel's "hovered category pops, its nodes read as a connected
+     group" behavior. */
+  function boardRingSvg(domainMetaList) {
+    var n = Math.max(domainMetaList.length, 1), R = 27; // matches layoutBoardTree's own R0
     var C = 2 * Math.PI * R;
     var segTotal = C / n;
     var segLen = Math.max(segTotal - 2.2, 1);
-    var arcs = DOMAIN_META.map(function (dm, i) {
-      return '<circle cx="50" cy="50" r="' + R + '" fill="none" stroke="' + dm.color + '" stroke-width="2.4" ' +
-        'stroke-dasharray="' + segLen.toFixed(2) + ' ' + (C - segLen).toFixed(2) + '" ' +
-        'stroke-dashoffset="' + (-(i * segTotal)).toFixed(2) + '" opacity="0.55"></circle>';
+    var dash = segLen.toFixed(2) + " " + (C - segLen).toFixed(2);
+    var arcs = domainMetaList.map(function (dm, i) {
+      var offset = (-(i * segTotal)).toFixed(2);
+      return '<g class="board-sector" data-sector-domain="' + esc(dm.key) + '">' +
+        '<circle class="board-sector-hit" cx="50" cy="50" r="' + R + '" fill="none" stroke="transparent" stroke-width="9" ' +
+        'stroke-dasharray="' + dash + '" stroke-dashoffset="' + offset + '"></circle>' +
+        '<circle class="board-sector-arc" cx="50" cy="50" r="' + R + '" fill="none" stroke="' + dm.color + '" stroke-width="2.4" ' +
+        'stroke-dasharray="' + dash + '" stroke-dashoffset="' + offset + '" opacity="0.55"></circle>' +
+        "</g>";
     }).join("");
     return '<svg class="board-ring" viewBox="0 0 100 100"><g transform="rotate(-90 50 50)">' + arcs + "</g></svg>";
   }
-  function boardLegendHtml() {
-    return '<div class="board-legend">' + DOMAIN_META.map(function (dm) {
-      return '<span class="board-legend-item"><span class="board-legend-dot" style="background:' + dm.color + '"></span>' + esc(dm.label) + "</span>";
+  function boardLegendHtml(domainMetaList) {
+    if (!domainMetaList.length) return "";
+    return '<div class="board-legend">' + domainMetaList.map(function (dm) {
+      return '<span class="board-legend-item" data-legend-domain="' + esc(dm.key) + '"><span class="board-legend-dot" style="background:' + dm.color + '"></span>' + esc(dm.label) + "</span>";
     }).join("") + "</div>";
   }
   /* Added 2026-08-31 — direct founder feedback that the board "doesn't
@@ -4178,7 +4305,7 @@
      anything about — and says plainly when a topic is restricted, rather
      than silently showing nothing. */
   function boardNodeTooltip(p, d, mode) {
-    var domLabel = domainMeta(d.domain || "other").label;
+    var domLabel = domainMeta(d.domain || "Other").label;
     if (mode === "none") return "🔒 [" + domLabel + "] Restricted — needs " + LEVEL_LABEL[d.visibility] + " clearance to view.";
     var summary = d.derived || (mode === "source" && d.why && d.why[0]) || "";
     var prefix = "[" + domLabel + "] ";
@@ -4192,6 +4319,15 @@
     if (d.viaVantage) return "🧭";
     return "🗂";
   }
+  // Direct founder feedback (2026-09-01): "I dont like the brain emoji,
+  // seems unprofessional." Replaced with a small inline node-network glyph
+  // -- matching this app's existing zero-icon-library convention (see the
+  // landing page's own SVG feature icons) and reading as "a connected
+  // network of knowledge," the same idea the emoji was standing in for.
+  var BRAIN_ICON_SVG = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+    '<circle cx="12" cy="5.5" r="2.1"/><circle cx="5.5" cy="12" r="2.1"/><circle cx="18.5" cy="12" r="2.1"/><circle cx="8.5" cy="18.5" r="2.1"/><circle cx="15.5" cy="18.5" r="2.1"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>' +
+    '<line x1="12" y1="7.2" x2="12" y2="10.7"/><line x1="7.2" y1="12.3" x2="10.5" y2="12"/><line x1="13.5" y1="12" x2="16.8" y2="12.3"/><line x1="10.6" y1="13.1" x2="9.1" y2="17"/><line x1="13.4" y1="13.1" x2="14.9" y2="17"/><line x1="10.4" y1="19.2" x2="13.6" y2="19.2"/>' +
+    "</svg>";
   function nodeMatchesBoardQuery(d, q) {
     if (!q) return true;
     var words = tokenize(q);
@@ -4214,62 +4350,103 @@
     }
     var decisions = company.decisions;
     var countLabel = decisions.length === 1 ? "1 topic" : decisions.length + " topics";
+    var domainMetaList = computeDomainMeta(decisions);
     var legendEl = document.getElementById("board-legend-slot");
-    if (legendEl) legendEl.innerHTML = boardLegendHtml();
+    if (legendEl) legendEl.innerHTML = boardLegendHtml(domainMetaList);
     if (decisions.length === 0) {
-      board.innerHTML = boardRingSvg() +
-        '<div class="brain-core"><span>🧠</span><span class="board-count">0 topics</span></div>' +
-        '<div class="empty-decisions" style="position:absolute;top:64%;left:50%;transform:translateX(-50%);width:78%">Nothing captured yet. Ask Cognex something and save it, or use Complete the Story — new topics will appear here, sorted into the departments above as the company brain grows.</div>';
+      board.innerHTML = boardRingSvg(domainMetaList) +
+        '<div class="brain-core"><span class="brain-core-icon">' + BRAIN_ICON_SVG + '</span><span class="board-count">0 topics</span></div>' +
+        '<div class="empty-decisions" style="position:absolute;top:64%;left:50%;transform:translateX(-50%);width:78%">Nothing captured yet. Ask Cognex something and save it, or use Complete the Story — a first department will appear here the moment it does, and more will grow in as the company brain learns new areas.</div>';
       document.querySelectorAll("[data-log-review]").forEach(function (btn) {
         btn.addEventListener("click", function () { logReviewOutcome(btn.getAttribute("data-log-review")); });
       });
       return;
     }
-    var tree = layoutBoardTree(decisions);
+    var tree = layoutBoardTree(decisions, domainMetaList);
     var positions = tree.positions;
     var linesHtml = decisions.map(function (d) {
       if (!d.parentId) return ""; // a trunk connects to its domain arc, not another node -- no line needed
       var pos = positions[d.id], parentPos = positions[d.parentId];
       if (!pos || !parentPos) return "";
-      var color = domainMeta(d.domain || "other").color;
-      return '<line data-line-for="' + esc(d.id) + '" x1="' + parentPos.cx + '" y1="' + parentPos.cy + '" x2="' + pos.cx + '" y2="' + pos.cy + '" style="stroke:' + color + '"></line>';
+      var color = domainMeta(d.domain || "Other").color;
+      return '<line data-line-for="' + esc(d.id) + '" data-line-domain="' + esc((d.domain || "Other").trim() || "Other") + '" x1="' + parentPos.cx + '" y1="' + parentPos.cy + '" x2="' + pos.cx + '" y2="' + pos.cy + '" style="stroke:' + color + '"></line>';
     }).join("");
-    var ghostHtml = tree.emptyDomains.map(function (g) {
-      var dm = domainMeta(g.domain);
-      return '<div class="board-node board-node-ghost" style="left:' + g.cx + '%;top:' + g.cy + '%" title="No ' + esc(dm.label) + ' topics yet — they\'ll appear here as the company brain learns about this area.">' +
-        '<div class="board-node-bubble" style="border-color:' + dm.color + '"></div></div>';
-    }).join("");
+    // Title length is trimmed harder than before, by depth: the title's
+    // own CSS now hard-clamps to 2 lines (see .board-node-title), and a
+    // shorter budget per depth means fewer titles actually need that
+    // clamp to kick in and truncate mid-sentence with a "…" trailing off.
+    function titleBudget(pos) {
+      if (pos.crowded) return 26;
+      if (pos.depth === 0) return 34;
+      if (pos.depth === 1) return 24;
+      return 18;
+    }
     var nodesHtml = decisions.map(function (d) {
       var pos = positions[d.id];
       if (!pos) return ""; // defensive -- shouldn't happen, every decision is placed by layoutBoardTree
       var mode = decisionView(p, d);
       var matches = nodeMatchesBoardQuery(d, ui.boardQuery);
-      var domKey = d.domain || "other";
-      var classes = "board-node dom-" + domKey + " depth-" + Math.min(pos.depth, 2) +
+      var domKey = (d.domain || "Other").trim() || "Other";
+      var domColor = domainMeta(domKey).color;
+      var classes = "board-node depth-" + Math.min(pos.depth, 2) +
         (mode !== "source" ? " locked" : "") + (mode === "derived" ? " derived" : "") +
         ((mode === "source" && decisionNeedsReview(d)) ? " needs-review" : "") + (matches ? "" : " dimmed") +
         (pos.crowded ? " crowded" : "");
       var tip = boardNodeTooltip(p, d, mode);
       var childBadge = pos.childCount > 0 ? '<span class="board-node-children" title="' + pos.childCount + ' sub-topic' + (pos.childCount === 1 ? "" : "s") + '">' + pos.childCount + "</span>" : "";
-      return '<div class="' + classes + '" style="left:' + pos.cx + '%;top:' + pos.cy + '%" data-node-id="' + esc(d.id) + '" tabindex="0" title="' + esc(tip) + '">' +
+      var budget = titleBudget(pos);
+      return '<div class="' + classes + '" style="left:' + pos.cx + '%;top:' + pos.cy + '%;--dom-color:' + domColor + '" data-node-id="' + esc(d.id) + '" data-node-domain="' + esc(domKey) + '" tabindex="0" title="' + esc(tip) + '">' +
         '<button class="board-node-del" data-del-node="' + esc(d.id) + '" title="Delete this topic" aria-label="Delete this topic">✕</button>' +
         childBadge +
         '<div class="board-node-bubble">' + boardNodeIcon(d) + '</div>' +
-        '<div class="board-node-title">' + esc(d.title.length > 36 ? d.title.slice(0, 36) + "…" : d.title) + "</div>" +
+        '<div class="board-node-title">' + esc(d.title.length > budget ? d.title.slice(0, budget) + "…" : d.title) + "</div>" +
         "</div>";
     }).join("");
-    board.innerHTML = boardRingSvg() +
+    board.innerHTML = boardRingSvg(domainMetaList) +
       '<svg class="board-lines" viewBox="0 0 100 100" preserveAspectRatio="none">' + linesHtml + "</svg>" +
-      '<div class="brain-core"><span>🧠</span><span class="board-count">' + countLabel + '</span></div>' + ghostHtml + nodesHtml;
+      '<div class="brain-core"><span class="brain-core-icon">' + BRAIN_ICON_SVG + '</span><span class="board-count">' + countLabel + '</span></div>' + nodesHtml;
 
+    // Watch Dogs: Legion-style focus: hovering a department's ring sector,
+    // its legend row, or any one of its nodes highlights the whole group
+    // together (matching nodes pop, the arc pops, everyone else on the
+    // board recedes slightly) -- a single shared entry point since three
+    // different kinds of element can trigger the exact same highlight.
+    function setHotDomain(domainKey) {
+      board.classList.toggle("has-hot-domain", !!domainKey);
+      board.querySelectorAll("[data-node-domain]").forEach(function (el) {
+        el.classList.toggle("dom-hot", domainKey && el.getAttribute("data-node-domain") === domainKey);
+      });
+      board.querySelectorAll("[data-sector-domain]").forEach(function (el) {
+        el.classList.toggle("is-hot", domainKey && el.getAttribute("data-sector-domain") === domainKey);
+      });
+      if (legendEl) {
+        legendEl.querySelectorAll("[data-legend-domain]").forEach(function (el) {
+          el.classList.toggle("is-hot", domainKey && el.getAttribute("data-legend-domain") === domainKey);
+        });
+      }
+    }
     document.querySelectorAll("[data-log-review]").forEach(function (btn) {
       btn.addEventListener("click", function () { logReviewOutcome(btn.getAttribute("data-log-review")); });
     });
+    board.querySelectorAll("[data-sector-domain]").forEach(function (el) {
+      var domainKey = el.getAttribute("data-sector-domain");
+      el.addEventListener("mouseenter", function () { setHotDomain(domainKey); });
+      el.addEventListener("mouseleave", function () { setHotDomain(null); });
+    });
+    if (legendEl) {
+      legendEl.querySelectorAll("[data-legend-domain]").forEach(function (el) {
+        var domainKey = el.getAttribute("data-legend-domain");
+        el.addEventListener("mouseenter", function () { setHotDomain(domainKey); });
+        el.addEventListener("mouseleave", function () { setHotDomain(null); });
+      });
+    }
     document.querySelectorAll("[data-node-id]").forEach(function (el) {
       var id = el.getAttribute("data-node-id");
+      var domainKey = el.getAttribute("data-node-domain");
       el.addEventListener("click", function () { openBoardNode(id); });
       el.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBoardNode(id); } });
       el.addEventListener("mouseenter", function () {
+        setHotDomain(domainKey);
         var line = board.querySelector('[data-line-for="' + CSS.escape(id) + '"]');
         if (line) line.classList.add("hot");
         var d = decisions.filter(function (x) { return x.id === id; })[0];
@@ -4279,6 +4456,7 @@
         }
       });
       el.addEventListener("mouseleave", function () {
+        setHotDomain(null);
         var line = board.querySelector('[data-line-for="' + CSS.escape(id) + '"]');
         if (line) line.classList.remove("hot");
         board.querySelectorAll(".hot-parent").forEach(function (x) { x.classList.remove("hot-parent"); });
@@ -4303,7 +4481,7 @@
     var chatTag = d.viaChat ? '<span class="badge badge-chat">Ask Cognex</span>' : "";
     var vantageTag = d.viaVantage ? '<span class="badge badge-type">Vantage</span>' : "";
     var reviewTag = (mode === "source" && decisionNeedsReview(d)) ? ' <span class="badge badge-review">Needs review</span>' : "";
-    var dm = domainMeta(d.domain || "other");
+    var dm = domainMeta(d.domain || "Other");
     var domainTag = '<span class="badge" style="background:' + dm.color + '22;color:' + dm.color + '">' + esc(dm.label) + "</span>";
     var parent = d.parentId ? company.decisions.filter(function (x) { return x.id === d.parentId; })[0] : null;
     var children = company.decisions.filter(function (x) { return x.parentId === d.id; });

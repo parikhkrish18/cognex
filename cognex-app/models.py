@@ -101,9 +101,15 @@ class Decision(Base):
     # Added 2026-08-31 for the department-hub Brain Board redesign (direct
     # founder ask: core business departments that "strand" into smaller,
     # sharper parts as the company brain grows). `domain` is the broad
-    # knowledge-domain key (one of live.py's fixed DOMAIN_KEYS -- "product",
-    # "gtm", "ops", "pricing", "hiring", "other") that decides which colored
-    # arc of the ring a node sits under. `parent_id` makes a node a "branch"
+    # department name that decides which colored arc of the ring a node
+    # sits under. Originally a fixed six-value set baked into live.py; per
+    # 2026-09-01 founder feedback ("the company brain should smartly grow
+    # using AI and gain new departments as required") it's now just a plain
+    # free-text string Claude assigns per topic (see live.py's
+    # consolidate_memory / _normalize_domain) -- no enum or fixed list
+    # anywhere, including at this column's own default below, which is only
+    # ever a defensive fallback for a row nothing has classified yet.
+    # `parent_id` makes a node a "branch"
     # of another node already on the board (null = a "trunk", attached
     # directly to its domain's arc) instead of every node sitting in one
     # flat ring -- populated either by consolidate_memory's "new_branch"
