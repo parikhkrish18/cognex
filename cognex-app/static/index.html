@@ -1,5 +1,5 @@
 <title>Cognex</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
 <style>
   /* ============ Tokens — single light theme, deliberate ============ */
@@ -351,12 +351,80 @@
   .btn-block { width: 100%; }
 
   /* ============ App shell — sidebar + chat layout, familiar to anyone who's used Claude or ChatGPT ============ */
-  #app-shell { height: 100vh; display: flex; flex-direction: column; }
+  #app-shell { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
   .app-shell-flex { flex: 1; min-height: 0; display: flex; }
-  @media (max-width: 860px) { .app-shell-flex { flex-direction: column; } }
 
   .nav-rail { width: 272px; flex: none; background: var(--bg-soft); border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; overflow-y: auto; }
-  @media (max-width: 860px) { .nav-rail { width: 100%; max-height: 44vh; border-right: none; border-bottom: 1px solid var(--border-soft); } }
+
+  /* ============ Mobile nav drawer (2026-09-03) ============
+     Below 860px this used to just stack .nav-rail on top of .main-pane --
+     the sidebar capped at 44vh of the screen, the chat squeezed into
+     whatever was left below it, both visible and both cramped at once.
+     Direct founder feedback: "the app itself should have a closed sidebar
+     whereas [it was] the top half and the chat is the bottom half." Fixed
+     by switching to the standard mobile chat-app pattern instead: the
+     sidebar becomes a full-height overlay drawer, closed by default, opened
+     by a hamburger button in a thin top bar that only exists at this width;
+     whichever panel is open (chat included) always gets the FULL screen
+     underneath it, exactly like the desktop layout minus the permanently
+     visible rail. `.mobile-nav-toggle`'s click handler and the scrim's own
+     click-to-close live in the "Global wiring" section below. */
+  .mobile-topbar { display: none; }
+  .nav-scrim { display: none; }
+
+  @media (max-width: 860px) {
+    .mobile-topbar {
+      display: flex; align-items: center; gap: 12px; flex: none;
+      padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+      border-bottom: 1px solid var(--border-soft); background: var(--bg);
+    }
+    .mobile-nav-toggle {
+      flex: none; width: 38px; height: 38px; padding: 0; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    }
+    .mobile-nav-toggle .bar { width: 17px; height: 2px; border-radius: 2px; background: var(--ink); display: block; }
+    .mobile-topbar-title { flex: 1; min-width: 0; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .nav-rail {
+      position: fixed; top: 0; bottom: 0; left: 0; z-index: 70;
+      width: min(320px, 84vw); max-height: none;
+      border-right: 1px solid var(--border-soft); border-bottom: none;
+      padding-top: env(safe-area-inset-top);
+      transform: translateX(-100%);
+      transition: transform .22s cubic-bezier(.16,.84,.44,1);
+    }
+    .nav-rail.is-open { transform: translateX(0); box-shadow: 12px 0 32px rgba(0,0,0,0.16); }
+
+    .nav-scrim {
+      display: block; position: fixed; inset: 0; z-index: 69;
+      background: rgba(0,0,0,0.4); opacity: 0; pointer-events: none;
+      transition: opacity .22s ease;
+    }
+    .nav-scrim.is-open { opacity: 1; pointer-events: auto; }
+
+    /* iOS Safari's <16px focus-zoom is a real usability bug, not a style
+       choice -- every text input reachable inside the app shell gets bumped
+       to the zoom-safe floor at this width, overriding each control's own
+       (desktop-tuned) smaller size. */
+    .composer input, .composer textarea, .field input, .field select, .field textarea,
+    .board-search, .nav-thread-row .tt-input { font-size: 16px; }
+
+    .chat-inner { padding: 18px 14px 14px; }
+    .chat-welcome { padding: 24px 2px 6px; }
+    .composer-dock { padding: 10px 14px calc(16px + env(safe-area-inset-bottom)); }
+
+    body.mobile-nav-locked { overflow: hidden; }
+  }
+
+  /* Delete/rename controls that only reveal on :hover are unreachable on a
+     touch device (there's no hover) -- always show them once there's no
+     hover capability at all, regardless of screen size, so a tablet in
+     touch mode gets this too, not just narrow phone widths. */
+  @media (hover: none) {
+    .nav-thread-del, .nav-thread-rename { opacity: 1; }
+    .board-node-del { opacity: 1; }
+  }
   .nav-brand { padding: 18px 16px 2px; }
   .nav-brand-mark { font-weight: 600; font-size: 17px; letter-spacing: -0.02em; }
   .nav-brand-tag { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
@@ -1206,8 +1274,15 @@
 
 <!-- ============ Main app shell — sidebar + chat, like Claude or ChatGPT ============ -->
 <div id="app-shell" style="display:none">
+  <div class="mobile-topbar">
+    <button class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="nav-rail">
+      <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+    </button>
+    <div class="mobile-topbar-title" id="mobile-topbar-title">Cognex</div>
+  </div>
+  <div class="nav-scrim" id="nav-scrim"></div>
   <div class="app-shell-flex">
-    <nav class="nav-rail">
+    <nav class="nav-rail" id="nav-rail">
       <div class="nav-brand">
         <div class="nav-brand-mark">Cognex</div>
         <div class="nav-brand-tag" id="company-tag">Company memory</div>
@@ -2713,6 +2788,7 @@
   function chatFor() { return activeThread().turns; }
   function startNewChat() {
     closeOutputPanel();
+    setMobileNavOpen(false); // "New chat" was tapped from inside the drawer -- get out of the way
     var cs = chatStateFor();
     var active = activeThread();
     // Reuse an already-empty "New chat" rather than stacking up blank threads.
@@ -2725,6 +2801,7 @@
   }
   function switchThread(id) {
     closeOutputPanel();
+    setMobileNavOpen(false); // a thread was picked from inside the drawer -- get out of the way
     var cs = chatStateFor();
     cs.activeId = id;
     state.tab = "ask";
@@ -3307,6 +3384,10 @@
   }
 
   var TAB_IDS = ["ask", "decisions", "goals", "story", "tree", "vantage", "documents", "handoffs", "admin"];
+  // Labels for the mobile top bar's title (renderTabs() below keeps it in
+  // sync) -- with the sidebar hidden by default on mobile, this is the only
+  // persistent "where am I" cue, so it needs real words, not the nav icon.
+  var TAB_LABELS = { ask: "Ask Cognex", decisions: "Company Brain", goals: "Goal Alignment", story: "Complete the Story", tree: "Company Tree", vantage: "The Vantage Room", documents: "Documents", handoffs: "Handoffs", admin: "Admin" };
   function renderTabs() {
     var company = currentCompany(), p = currentPersona();
     var adminBtn = document.getElementById("admin-tab-btn");
@@ -3328,6 +3409,8 @@
       document.getElementById("tab-" + id).style.display = state.tab === id ? (id === "ask" ? "flex" : "block") : "none";
     });
     document.getElementById("main-scroll").style.display = state.tab === "ask" ? "none" : "block";
+    var mobileTitle = document.getElementById("mobile-topbar-title");
+    if (mobileTitle) mobileTitle.textContent = TAB_LABELS[state.tab] || "Cognex";
   }
 
   function renderAsk() {
@@ -5888,6 +5971,44 @@
     });
   }
 
+  /* ============ Mobile nav drawer (2026-09-03) ============
+     See the .nav-rail/.mobile-topbar/.nav-scrim CSS above for why this
+     exists. Kept as one small toggle function rather than folding into
+     renderApp() -- opening/closing the drawer has nothing to do with what's
+     rendered inside it, so running a full render cycle on every tap would
+     be wasted work and would risk stealing scroll position/focus for no
+     reason. startNewChat(), switchThread(), and the workspace-tab click
+     handler above each call this directly (mirroring how they already call
+     closeOutputPanel() as their own "get out of the way" step); the toggle
+     button and the scrim below are the two ways to open/close it by hand. */
+  function setMobileNavOpen(open) {
+    var rail = document.getElementById("nav-rail");
+    var scrim = document.getElementById("nav-scrim");
+    var toggle = document.getElementById("mobile-nav-toggle");
+    if (!rail || !scrim || !toggle) return;
+    rail.classList.toggle("is-open", open);
+    scrim.classList.toggle("is-open", open);
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    // The drawer overlays the whole screen at this width, so lock the
+    // underlying app from scrolling behind it while it's open -- harmless
+    // at desktop widths too, since .mobile-nav-locked only ever gets added
+    // via this same toggle, which only a visible (mobile-width) button fires.
+    document.body.classList.toggle("mobile-nav-locked", open);
+  }
+  document.getElementById("mobile-nav-toggle").addEventListener("click", function () {
+    setMobileNavOpen(!document.getElementById("nav-rail").classList.contains("is-open"));
+  });
+  document.getElementById("nav-scrim").addEventListener("click", function () { setMobileNavOpen(false); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && document.getElementById("nav-rail").classList.contains("is-open")) setMobileNavOpen(false);
+  });
+  // Resizing back out to desktop width (rotating a tablet, or a real resize)
+  // should leave the drawer state clean rather than have it silently
+  // re-open the instant the viewport narrows again later.
+  window.addEventListener("resize", function () {
+    if (window.innerWidth > 860) setMobileNavOpen(false);
+  });
+
   /* ============ Global wiring ============ */
   document.getElementById("chat-log").addEventListener("click", function (e) {
     var copyBtn = e.target.closest("[data-copy-target]");
@@ -5916,6 +6037,7 @@
     var btn = e.target.closest(".tab-btn");
     if (!btn || btn.style.display === "none") return;
     state.tab = btn.getAttribute("data-tab");
+    setMobileNavOpen(false); // a workspace tab was picked from inside the drawer -- get out of the way
     if (state.tab !== "ask") closeOutputPanel();
     if (state.tab === "decisions") {
       var company = currentCompany(), p = currentPersona();
