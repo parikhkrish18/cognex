@@ -1399,8 +1399,20 @@
   ];
 
   /* ============ Utilities ============ */
+  // Fixed 2026-09-03 (full-app-audit-2026-09-02 critical finding): this used
+  // to leave " and ' unescaped while being relied on throughout this file to
+  // fill double-quoted HTML attributes (title="...", data-id="...", etc.) --
+  // a stray " in ANY escaped value broke out of its attribute and could
+  // inject a live event handler. Because Ask Cognex auto-saves finished
+  // turns as company-wide-visible decision titles by default, a crafted
+  // message became a Brain Board node that fired the payload for anyone who
+  // so much as hovered it. Escaping &, <, >, ", and ' covers every context
+  // this function is actually used in (element text, attribute values);
+  // there is no legitimate reason for a quote to pass through unescaped.
   function esc(s) {
-    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   function tokenize(s) {
     return s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
@@ -1590,10 +1602,23 @@
      state is still correct — it just won't survive a reload. Same
      graceful-degradation pattern already used for Ask Cognex, Complete the
      Story, and Vantage. */
+  // Every /api/v2 call now needs to prove who it is (see auth.py /
+  // full-app-audit-2026-09-02's critical "46 of 48 routes unauthenticated"
+  // finding) -- centralizing that here means every existing apiV2 call site
+  // gets it automatically, with nothing to change at the call site itself.
+  // Sent as a header, not a ?token= query string, so it never lands in
+  // access/proxy logs (see loadCompanyFromServer's old comment, which this
+  // replaces).
+  function authHeaders(extra) {
+    var h = extra || {};
+    if (sessionToken) h["authorization"] = "Bearer " + sessionToken;
+    return h;
+  }
   function apiV2(method, path, body) {
+    var headers = authHeaders(body !== undefined ? { "content-type": "application/json" } : {});
     return fetch("/api/v2" + path, {
       method: method,
-      headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     }).then(function (res) {
       if (!res.ok) {
@@ -1699,15 +1724,15 @@
   }
   function loadCompanyFromServer(companyId) {
     // 2026-08-31: GET /companies/{id} now requires a session token (see
-    // persistence.py's _require_session) — it used to return a company's
-    // full confidential Decision Memory to anyone who knew or guessed its
-    // id, with zero credential of any kind. sessionToken is null before
-    // anyone has signed in (e.g. the unconditional pre-load on first page
-    // load below), which now simply 401s and is caught same as any other
+    // auth.py's require_session) — it used to return a company's full
+    // confidential Decision Memory to anyone who knew or guessed its id,
+    // with zero credential of any kind. sessionToken is null before anyone
+    // has signed in (e.g. the unconditional pre-load on first page load
+    // below), which now simply 401s and is caught same as any other
     // "backend unreachable" case -- the local seed stays in place until a
-    // real, authenticated snapshot is available.
-    var qs = sessionToken ? ("?token=" + encodeURIComponent(sessionToken)) : "";
-    return apiV2("GET", "/companies/" + encodeURIComponent(companyId) + qs).then(function (sc) {
+    // real, authenticated snapshot is available. apiV2 attaches the token
+    // itself (as a header, via authHeaders) whenever one is set.
+    return apiV2("GET", "/companies/" + encodeURIComponent(companyId)).then(function (sc) {
       COMPANIES[companyId] = serverCompanyToLocal(sc);
       return COMPANIES[companyId];
     });
@@ -1778,7 +1803,7 @@
     }
     function runSplit(target) {
       fetch("/api/memory/split_plan", {
-        method: "POST", headers: { "content-type": "application/json" },
+        method: "POST", headers: authHeaders({ "content-type": "application/json" }),
         body: JSON.stringify({
           target: { id: target.id, title: target.title, tags: target.tags || [], derived: target.derived || "", domain: target.domain || "other", why: target.why || [] },
           new_content: { title: draftDecision.title, body: bodyText, source_kind: sourceKind, source_persona: draftDecision.owner || "", date: draftDecision.decided },
@@ -1794,7 +1819,7 @@
           return { id: target.id + "-" + (i + 1), title: c.title, summary: c.summary, tags: c.tags || [], why: why };
         });
         fetch("/api/v2/companies/" + company.id + "/decisions/" + encodeURIComponent(target.id) + "/split", {
-          method: "POST", headers: { "content-type": "application/json" },
+          method: "POST", headers: authHeaders({ "content-type": "application/json" }),
           body: JSON.stringify({ trunkTitle: plan.trunk_title, trunkSummary: plan.trunk_summary, trunkTags: plan.trunk_tags, children: children }),
         }).then(function (res2) {
           if (!res2.ok) throw new Error("split execution failed (" + res2.status + ")");
@@ -1831,7 +1856,7 @@
       });
     }
     fetch("/api/memory/consolidate", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({
         candidates: candidates,
         new_content: { title: draftDecision.title, body: bodyText, source_kind: sourceKind, source_persona: draftDecision.owner || "", date: draftDecision.decided },
@@ -1946,7 +1971,7 @@
     }
     if (stored.type === "company" && stored.companyId && stored.personaId) {
       if (!stored.token) { clearPersistedSession(); done(); return; } // same pre-token-fix fallback as above
-      fetch("/api/v2/companies/" + encodeURIComponent(stored.companyId) + "?token=" + encodeURIComponent(stored.token))
+      fetch("/api/v2/companies/" + encodeURIComponent(stored.companyId), { headers: { "authorization": "Bearer " + stored.token } })
         .then(function (res) { if (!res.ok) throw new Error("stale company"); return res.json(); })
         .then(function (company) {
           if (!company.personas || !company.personas[stored.personaId]) throw new Error("stale persona");
@@ -2225,7 +2250,7 @@
 
     fetch("/api/vantage/scan", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({
         persona: { id: p.id, name: p.name, title: p.title, level: p.level, dept: p.dept },
         candidates: candidates.map(function (c) {
@@ -2560,120 +2585,23 @@
     if (mode === "derived") return '<span class="badge badge-derived">Derived</span>';
     return '<span class="badge badge-locked">Restricted</span>';
   }
-  function decisionSourceLine(p, d) {
-    var mode = decisionView(p, d);
-    return { mode: mode, html: '<span class="src-title">' + esc(d.title) + '</span> ' + sourceBadgeFor(mode) + ' <span class="badge badge-neutral">needs ' + LEVEL_LABEL[d.visibility] + '</span>' };
-  }
-  function findDecision(company, id) { return company.decisions.filter(function (x) { return x.id === id; })[0]; }
-
-  function acquisitionAnswer(company, p) {
-    var d = findDecision(company, "d-acquire-northwind");
-    if (!d) return { text: "No acquisition-related decisions are recorded yet.", sources: [] };
-    var mode = decisionView(p, d);
-    if (mode === "source") {
-      return {
-        text: "Yes. On " + d.decided + " you approved the acquisition of Northwind Logistics. " + d.why.join(" ") + " Alternatives considered: " + d.alternatives.join("; ") + ". Status: <em>" + d.result + "</em>.",
-        sources: [decisionSourceLine(p, d)],
-      };
-    }
-    return { text: d.derived + " <em>(The underlying decision is restricted above your clearance — showing derived context only.)</em>", sources: [decisionSourceLine(p, d)] };
-  }
-  function germanyAnswer(company, p) {
-    var d = findDecision(company, "d-no-germany");
-    if (!d) return genericAnswer(company, p, "germany");
-    var mode = decisionView(p, d);
-    if (mode === "source") return { text: "We evaluated entering Germany and decided against it on " + d.decided + ". " + d.why.join(" ") + " Alternatives on the table were: " + d.alternatives.join("; ") + ". Outcome: " + d.result + ".", sources: [decisionSourceLine(p, d)] };
-    if (mode === "derived") return { text: d.derived, sources: [decisionSourceLine(p, d)] };
-    return { text: "That decision sits above your current clearance, and no derived summary is published for your role yet.", sources: [decisionSourceLine(p, d)] };
-  }
-  function indiaVietnamAnswer(company, p) {
-    var d = findDecision(company, "d-india-vietnam");
-    if (!d) return genericAnswer(company, p, "manufacturing");
-    var mode = decisionView(p, d);
-    if (mode === "source") return { text: "Manufacturing moved to India instead of Vietnam on " + d.decided + ". " + d.why.join(" ") + " A formal review was scheduled for " + d.review + ".", sources: [decisionSourceLine(p, d)] };
-    if (mode === "derived") return { text: d.derived, sources: [decisionSourceLine(p, d)] };
-    return { text: "That sourcing decision is restricted above your clearance, and no public summary exists for your role.", sources: [decisionSourceLine(p, d)] };
-  }
-  function enterpriseApproachAnswer(company, p) {
-    var d = findDecision(company, "d-launch-x");
-    var g = company.goals.filter(function (x) { return x.id === "g-sales"; })[0];
-    if (!d || !g) return genericAnswer(company, p, "enterprise customers");
-    return {
-      text: "Enterprise customers drive real decisions here — three major accounts requesting Product X directly is a documented reason it's launching in Q4. On the go-to-market side, the current push is " + g.title.toLowerCase() + ".",
-      sources: [decisionSourceLine(p, d), { mode: "source", html: '<span class="src-title">' + esc(g.title) + '</span> <span class="badge badge-source">Source</span> <span class="badge badge-neutral">' + esc(g.kicker) + '</span>' }],
-    };
-  }
-  function whyWorkingAnswer(company, p) {
-    var ig = individualGoalFor(company, p);
-    if (ig) {
-      var chain = goalChain(company, ig);
-      return {
-        text: chain.map(function (g) { return g.title; }).join(" → which supports → ") + ".",
-        sources: chain.map(function (g) { return { mode: "source", html: '<span class="src-title">' + esc(g.title) + '</span> <span class="badge badge-source">Source</span> <span class="badge badge-neutral">' + esc(g.kicker) + '</span>' }; }),
-      };
-    }
-    var dept = company.goals.filter(function (g) { return g.depth === 1 && g.dept === p.dept; })[0];
-    if (dept) {
-      return { text: "Your team's work ladders up to “" + dept.title + "”, which is how " + p.dept + " contributes to company strategy.", sources: [{ mode: "source", html: '<span class="src-title">' + esc(dept.title) + '</span> <span class="badge badge-source">Source</span> <span class="badge badge-neutral">' + esc(dept.kicker) + '</span>' }] };
-    }
-    var root = company.goals.filter(function (g) { return g.depth === 0; })[0];
-    if (root) return { text: "At your level the relevant frame is company strategy itself: " + root.title + ", which every department goal beneath it is built to support.", sources: [{ mode: "source", html: '<span class="src-title">' + esc(root.title) + '</span> <span class="badge badge-source">Source</span> <span class="badge badge-neutral">Company goal</span>' }] };
-    return { text: "No company goals are recorded yet — add one from Goal Alignment to start connecting individual work to strategy.", sources: [] };
-  }
-  function prioritiesAnswer(company, p) {
-    var mine = company.goals.filter(function (g) {
-      if (g.dept !== p.dept) return false;
-      if (p.level <= LEVEL.employee) return g.owner === p.id;
-      return g.depth >= 1;
-    });
-    if (mine.length === 0) mine = company.goals.filter(function (g) { return g.dept === p.dept; });
-    if (mine.length === 0) return { text: "No goals are recorded for " + p.dept + " yet.", sources: [] };
-    var list = mine.map(function (g) { return g.title; }).join("; ");
-    return { text: "For " + p.dept + ", the live priorities are: " + list + ".", sources: mine.map(function (g) { return { mode: "source", html: '<span class="src-title">' + esc(g.title) + '</span> <span class="badge badge-source">Source</span> <span class="badge badge-neutral">' + esc(g.kicker) + '</span>' }; }) };
-  }
-  function risksAnswer(company, p) {
-    var visible = company.decisions.filter(function (d) { return accessible(p, d); });
-    var restricted = company.decisions.filter(function (d) { return !accessible(p, d); });
-    if (company.decisions.length === 0) return { text: "No decisions are recorded yet, so there's nothing to assess risk against.", sources: [] };
-    var riskLines = [];
-    visible.forEach(function (d) { d.risks.forEach(function (r) { riskLines.push(d.title + ": " + r); }); });
-    var text = riskLines.length ? "Across decisions you can see the source record for, the live risks are — " + riskLines.join(" | ") + "." : "None of the decisions you have source access to list open risks.";
-    if (restricted.length) text += " " + restricted.length + " additional decision" + (restricted.length > 1 ? "s sit" : " sits") + " above your clearance; you'd see derived outcomes for those where one has been published, not their raw risk register.";
-    return { text: text, sources: company.decisions.map(function (d) { return decisionSourceLine(p, d); }) };
-  }
-  function genericAnswer(company, p, query) {
-    var decisions = searchDecisions(company, query);
-    var goals = searchGoals(company, query);
-    if (decisions.length === 0 && goals.length === 0) return { text: "No memory objects matched that closely. Try one of the suggested questions below.", sources: [] };
-    var parts = [], sources = [];
-    decisions.slice(0, 2).forEach(function (d) {
-      var mode = decisionView(p, d);
-      if (mode === "source") parts.push(d.title + " — " + d.why[0]);
-      else if (mode === "derived") parts.push(d.derived);
-      sources.push(decisionSourceLine(p, d));
-    });
-    goals.slice(0, 2).forEach(function (g) {
-      parts.push(g.title);
-      sources.push({ mode: "source", html: '<span class="src-title">' + esc(g.title) + '</span> <span class="badge badge-source">Source</span> <span class="badge badge-neutral">' + esc(g.kicker) + '</span>' });
-    });
-    return { text: (parts.join(" ") || "No accessible content matched.") + ".", sources: sources };
-  }
-
-  var INTENTS = [
-    { test: /germany/, run: germanyAnswer },
-    { test: /india|vietnam|manufactur/, run: indiaVietnamAnswer },
-    { test: /acqui|northwind|acquisition/, run: acquisitionAnswer },
-    { test: /enterprise custom/, run: enterpriseApproachAnswer },
-    { test: /why am i working|why is this project|why am i doing/, run: whyWorkingAnswer },
-    { test: /priorit/, run: prioritiesAnswer },
-    { test: /risk/, run: risksAnswer },
-  ];
-  function answer(company, p, query) {
-    for (var i = 0; i < INTENTS.length; i++) {
-      if (INTENTS[i].test.test(query.toLowerCase())) return INTENTS[i].run(company, p);
-    }
-    return genericAnswer(company, p, query);
-  }
+  // Removed 2026-09-03 (full-app-audit-2026-09-02 critical finding, explicit
+  // product decision): this file used to also define a local rule-based
+  // "answer engine" (germanyAnswer/indiaVietnamAnswer/acquisitionAnswer/
+  // enterpriseApproachAnswer/whyWorkingAnswer/prioritiesAnswer/risksAnswer/
+  // genericAnswer, dispatched through an INTENTS table) that synthesized a
+  // plausible-sounding response from whatever decisions/goals matched the
+  // query whenever the real assistant couldn't be reached. Its output was
+  // inserted into the page completely unescaped (renderChatLog's
+  // '<div class="body">' + turn.a.text — never run through esc() or
+  // renderRichText the way a real Claude answer is), so a decision or goal
+  // whose title contained HTML could inject a live script the moment the
+  // backend went offline — a routine, documented state of this app (no API
+  // key configured, a network hiccup, a proxy stripping the SSE stream),
+  // not an edge case. Rather than just fixing the escaping, the feature
+  // itself is gone: an unreachable backend now gets a plain, honest error
+  // pointing at support (see fallbackToOffline in submitQuestion) instead of
+  // a synthesized answer standing in for the real thing.
   function chipsFor(p) {
     var base = ["Why am I working on this project?", "What should I prioritize this month?", "Why did we decide not to enter Germany?"];
     if (p.level >= LEVEL.director) base.push("What are the biggest risks to our strategy?");
@@ -3178,7 +3106,7 @@
         var c = COMPANIES[id];
         return { id: id, name: c.name, industry: c.industry, seeded: c.seeded, memberCount: Object.keys(c.personas).length, adminCount: countAdmins(c) };
       });
-      apiV2("GET", "/platform/companies?token=" + encodeURIComponent(sessionToken || "")).then(function (data) {
+      apiV2("GET", "/platform/companies").then(function (data) {
         ui.platformCompanies = data.companies;
         if (session.type === "platform") renderPlatform();
       }).catch(function () { /* offline — keep the local-only listing */ });
@@ -3608,7 +3536,12 @@
         : turn.a.live
         ? '<span class="badge badge-source" style="margin-left:auto">Live · Claude</span>'
         : (turn.a.offline
-          ? '<span class="badge badge-neutral" style="margin-left:auto">Offline demo mode</span>'
+          // 2026-09-03: this used to read "Offline demo mode" back when an
+          // unreachable backend fell through to a local rule-based answer
+          // engine that actually produced content. That engine is gone
+          // (see fallbackToOffline) -- this is now a genuine error state,
+          // not a mode with its own content to label as a demo.
+          ? '<span class="badge badge-neutral" style="margin-left:auto">Assistant unavailable</span>'
           : '<span class="badge badge-neutral" style="margin-left:auto">as ' + esc(p.name.split(" ")[0]) + " · " + LEVEL_LABEL[p.level] + "</span>");
       // Auto-saves to Decision Memory by default (2026-08-31, direct founder
       // feedback) -- see autoSaveTurnToMemory. This button's job changes
@@ -3619,8 +3552,8 @@
       // a fallback rather than silently bulk-saving someone's whole
       // pre-existing chat history the first time they open it.
       var saveHtml;
-      if (turn.a.capped) {
-        saveHtml = ""; // a cap/rate-limit rejection message, not a real answer -- nothing to save
+      if (turn.a.capped || turn.a.offline) {
+        saveHtml = ""; // a cap/rate-limit rejection or offline error message, not a real answer -- nothing to save
       } else if (turn.savingToMemory) {
         saveHtml = '<span class="msg-saved" style="color:var(--ink-faint)">Saving…</span>';
       } else if (turn.excluded) {
@@ -3715,7 +3648,13 @@
   // consolidateThenSave appended in the merge case (turn.mergedWhyLine) --
   // excludeTurnFromMemory needs all three to do its best-effort undo later.
   function saveTurnToMemory(company, p, turn, onDone) {
-    if (!turn || turn.pending || !turn.a || turn.a.capped || turn.savedToMemory || turn.savingToMemory || turn.excluded) {
+    // turn.a.offline added 2026-09-03 alongside removing the offline
+    // rule-based answer engine (see fallbackToOffline) -- a plain "can't
+    // reach the assistant, contact support" message is an error, not
+    // captured knowledge, and was never meant to be saveable; before this
+    // it was only turn.a.capped (a rate-limit/cost-cap rejection) that this
+    // guard excluded.
+    if (!turn || turn.pending || !turn.a || turn.a.capped || turn.a.offline || turn.savedToMemory || turn.savingToMemory || turn.excluded) {
       if (onDone) onDone();
       return;
     }
@@ -3934,18 +3873,25 @@
       }
     }
     function fallbackToOffline() {
-      turn.a = answer(company, p, q);
-      turn.a.offline = true;
-      searchDecisions(company, q).forEach(function (d) {
-        var mode = decisionView(p, d);
-        if (mode !== "source") logAccessLedger(company, p, d.id, d.title, mode, "Ask Cognex (offline)");
-      });
+      // Replaced 2026-09-03 (full-app-audit-2026-09-02 critical finding,
+      // explicit product decision) — this used to hand off to a local
+      // rule-based "answer engine" that synthesized a plausible-sounding
+      // response and inserted it into the page completely unescaped. That
+      // whole feature is gone now, not patched: when the real assistant
+      // can't be reached, say so plainly and point at support, rather than
+      // guessing at an answer. Nothing is shown here that came from company
+      // data, so there's nothing to log to the access ledger either.
+      var offlineMessage = "Cognex can't reach the assistant right now. This may be temporary — please try again in a moment. If it keeps happening, contact support.";
+      turn.a = {
+        text: "<p>" + esc(offlineMessage) + "</p>", raw: offlineMessage,
+        thinking: [], sources: [], files: [], live: false, offline: true,
+      };
       finishTurn();
     }
 
     fetch("/api/ask/stream", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({
         persona: { id: p.id, name: p.name, title: p.title, level: p.level, dept: p.dept },
         decisions: company.decisions,
@@ -4450,7 +4396,7 @@
     btn.disabled = true; btn.textContent = "Tidying…";
     msgEl.style.display = "none";
     fetch("/api/board/tidy", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({
         topics: trunks.map(function (d) { return { id: d.id, title: d.title, domain: d.domain || "", why: d.why || [] }; }),
       }),
@@ -4958,7 +4904,7 @@
         return { title: t.title, messages: t.turns.map(function (turn) { return turn.q; }).filter(Boolean).slice(0, 8) };
       });
       fetch("/api/complete-story/questions", {
-        method: "POST", headers: { "content-type": "application/json" },
+        method: "POST", headers: authHeaders({ "content-type": "application/json" }),
         body: JSON.stringify({
           persona: { id: p.id, name: p.name, title: p.title, level: p.level, dept: p.dept },
           individual_goal: myGoal || null,
@@ -5030,7 +4976,7 @@
           ss.extracting = true;
           fetch("/api/complete-story/extract", {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: authHeaders({ "content-type": "application/json" }),
             body: JSON.stringify({
               work_item: story.workItem,
               qa_pairs: story.questions.map(function (qq) { return { question: qq.prompt, field: qq.field, answer: ss.answers[qq.field] || "" }; }),
@@ -5138,7 +5084,7 @@
      must confirm, exactly like Complete the Story already works. */
   function slackRefreshStatus() {
     var company = currentCompany();
-    fetch("/api/integrations/slack/status?company_id=" + encodeURIComponent(company.id))
+    fetch("/api/integrations/slack/status?company_id=" + encodeURIComponent(company.id), { headers: authHeaders() })
       .then(function (res) { return res.json(); })
       .then(function (data) { ui.slackStatus = data; if (data.connected) slackLoadCandidates(); else renderAdmin(); })
       .catch(function () { ui.slackStatus = { configured: false, connected: false, unreachable: true }; renderAdmin(); });
@@ -5146,7 +5092,14 @@
 
   function slackConnect() {
     var company = currentCompany();
-    var popup = window.open("/api/integrations/slack/authorize?company_id=" + encodeURIComponent(company.id), "slack-connect", "width=600,height=760");
+    // A window.open navigation can't carry an Authorization header the way
+    // every other call in this file now does (see authHeaders/apiV2) --
+    // ?token= is the one deliberate exception, matching what
+    // slack_integration.py's /authorize route expects (see its own comment
+    // on why).
+    var authUrl = "/api/integrations/slack/authorize?company_id=" + encodeURIComponent(company.id) +
+      (sessionToken ? ("&token=" + encodeURIComponent(sessionToken)) : "");
+    var popup = window.open(authUrl, "slack-connect", "width=600,height=760");
     if (!popup) { alert("Please allow popups for this site, then try Connect Slack again."); return; }
     var timer = setInterval(function () {
       if (popup.closed) { clearInterval(timer); slackRefreshStatus(); }
@@ -5156,7 +5109,7 @@
   function slackDisconnect() {
     var company = currentCompany();
     if (!confirm("Disconnect Slack for " + company.name + "? Already-confirmed decisions stay in Decision Memory; the stored connection and any unreviewed candidates are removed.")) return;
-    fetch("/api/integrations/slack/disconnect?company_id=" + encodeURIComponent(company.id), { method: "POST" })
+    fetch("/api/integrations/slack/disconnect?company_id=" + encodeURIComponent(company.id), { method: "POST", headers: authHeaders() })
       .then(function (res) {
         if (!res.ok) throw new Error("disconnect failed (" + res.status + ")");
         ui.slackCandidates = null; ui.slackMsg = ""; slackRefreshStatus();
@@ -5171,7 +5124,7 @@
     var company = currentCompany();
     ui.slackBusy = "sync"; ui.slackMsg = ""; renderAdmin();
     fetch("/api/integrations/slack/sync", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ company_id: company.id }),
     }).then(function (res) { if (!res.ok) return res.json().then(function (e) { throw new Error(e.detail || "Sync failed"); }); return res.json(); })
       .then(function (data) {
@@ -5188,7 +5141,7 @@
       var m = company.personas[id]; return { email: m.email, level: m.level };
     });
     fetch("/api/integrations/slack/extract", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ company_id: company.id, personas: personas }),
     }).then(function (res) { if (!res.ok) return res.json().then(function (e) { throw new Error(e.detail || "Extraction failed"); }); return res.json(); })
       .then(function (data) {
@@ -5201,7 +5154,7 @@
 
   function slackLoadCandidates() {
     var company = currentCompany();
-    fetch("/api/integrations/slack/candidates?company_id=" + encodeURIComponent(company.id))
+    fetch("/api/integrations/slack/candidates?company_id=" + encodeURIComponent(company.id), { headers: authHeaders() })
       .then(function (res) { return res.json(); })
       .then(function (data) { ui.slackCandidates = data; renderAdmin(); })
       .catch(function () { renderAdmin(); });
@@ -5210,7 +5163,7 @@
   function slackDismissCandidate(id) {
     var company = currentCompany();
     fetch("/api/integrations/slack/candidates/" + encodeURIComponent(id) + "/dismiss", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ company_id: company.id }),
     }).then(function () { slackLoadCandidates(); });
   }
@@ -5220,7 +5173,7 @@
     var visSelect = document.getElementById("cand-vis-" + id);
     var visibility = visSelect ? parseInt(visSelect.value, 10) : LEVEL.intern;
     fetch("/api/integrations/slack/candidates/" + encodeURIComponent(id) + "/confirm", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ company_id: company.id }),
     }).then(function (res) { return res.json(); })
       .then(function (row) {
@@ -5479,7 +5432,7 @@
     var myGoals = company.goals.filter(function (g) { return g.owner === p.id; });
     var myDecisions = company.decisions.filter(function (d) { return d.contributor && d.contributor.indexOf(p.name) !== -1; });
     fetch("/api/offboarding/questions", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ persona: { id: p.id, name: p.name, title: p.title, level: p.level, dept: p.dept }, goals: myGoals, decisions: myDecisions }),
     }).then(function (res) { if (!res.ok) throw new Error("backend unavailable (" + res.status + ")"); return res.json(); })
       .then(function (data) {
@@ -5511,7 +5464,7 @@
     ui.leaveFlow = { step: "extracting", qaPairs: qaPairs };
     renderShell();
     fetch("/api/offboarding/extract", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ persona: { id: p.id, name: p.name, title: p.title, level: p.level, dept: p.dept }, qa_pairs: qaPairs }),
     }).then(function (res) { if (!res.ok) throw new Error("backend unavailable (" + res.status + ")"); return res.json(); })
       .then(function (report) {
@@ -5636,7 +5589,7 @@
     if (!items.length) { handoff.suggestions = []; renderApp(); return; }
     handoff.suggestLoading = true; renderApp();
     fetch("/api/offboarding/suggest-delegates", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ items: items, candidates: candidates }),
     }).then(function (res) { if (!res.ok) throw new Error("backend unavailable (" + res.status + ")"); return res.json(); })
       .then(function (data) {
@@ -5755,7 +5708,7 @@
     // body) — a real multipart/form-data upload needs FormData with no
     // explicit content-type header, so the browser can set the correct
     // boundary itself.
-    fetch("/api/v2/companies/" + encodeURIComponent(company.id) + "/documents", { method: "POST", body: form })
+    fetch("/api/v2/companies/" + encodeURIComponent(company.id) + "/documents", { method: "POST", headers: authHeaders(), body: form })
       .then(function (res) {
         if (!res.ok) return res.json().catch(function () { return {}; }).then(function (e) { throw new Error(e.detail || ("upload failed (" + res.status + ")")); });
         return res.json();

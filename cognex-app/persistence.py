@@ -27,12 +27,16 @@ import io
 import secrets
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from datetime import datetime, timezone
 
+from auth import (
+    check_login_lockout, clear_login_failures, issue_token, record_login_failure,
+    require_any_session, require_persona_session, require_session, revoke_token, token_from_request,
+)
 from db_postgres import get_session
 from models import ChatThread, Company, CompanyUsage, Decision, Document, Goal, Handoff, LedgerEntry, Persona
 
@@ -48,47 +52,28 @@ STAFF_EMAIL = "admin@cognex.ai"
 STAFF_PASSWORD = "Admin@Cognex"
 
 # ---------------------------------------------------------------------------
-# Minimal session tokens — added 2026-08-31 after a security audit flagged
-# that GET /companies/{company_id} (which returns EVERY decision's full
-# why/alternatives/risks and the whole roster, unfiltered) had no credential
-# requirement at all: anyone who knew or guessed a company_id could read a
-# client's full confidential Decision Memory with zero authentication,
-# directly contradicting the product's core "chain of command protection"
-# pitch. This is NOT real authentication — there's still one shared password
-# per company (DEMO_PASSWORD) and one for staff (STAFF_PASSWORD), so it
-# doesn't stop someone who has that shared password from reading anything;
-# closing that gap for real is the explicitly-scoped-separate "real auth"
-# phase (a third-party provider, per the founder's own prior direction).
-# What THIS closes is the zero-credential drive-by: a company's confidential
-# data can no longer be read by an unauthenticated request that never went
-# through /login at all. An in-memory dict is deliberately sufficient here
-# (matching this file's existing demo-scale conventions) — these tokens are
-# only ever meant to gate reads for the lifetime of one server process, the
-# same way the rest of this "illustrative, not real auth" system already
-# works; they are NOT a substitute for real session/token verification.
-_SESSIONS: dict = {}  # token -> {"kind": "company"|"platform", "company_id": str|None, "persona_id": str|None}
+# Session tokens — see auth.py for issuance/validation/expiry and the full
+# history of why this exists. This file now only calls into it.
+# ---------------------------------------------------------------------------
+_issue_token = issue_token  # kept as a local alias -- every call site below already uses this name
+_require_session = require_session  # ditto
 
 
-def _issue_token(kind: str, company_id: Optional[str] = None, persona_id: Optional[str] = None) -> str:
-    token = secrets.token_urlsafe(32)
-    _SESSIONS[token] = {"kind": kind, "company_id": company_id, "persona_id": persona_id}
-    return token
-
-
-def _require_session(token: Optional[str], company_id: Optional[str] = None):
-    """Validates a session token for a read that should require SOME prior
-    login. A platform (staff) token is always accepted regardless of
-    company_id — staff legitimately need to read any company's data to
-    support it, mirroring the existing "Enter as support" flow. A company
-    token must match the specific company_id being read, so signing in to
-    one company never lets you read another's data by guessing its id."""
-    session = _SESSIONS.get(token) if token else None
-    if not session:
-        raise HTTPException(status_code=401, detail="Sign in required.")
+def _require_admin_session(db, token: Optional[str], company_id: str):
+    """Like require_session, but for roster changes specifically (add/edit/
+    remove a person) — added alongside the rest of this pass's auth work.
+    A platform (staff) session may always administer any company, same as
+    everywhere else. A company session must belong to a persona who is
+    actually an org admin; a regular employee's valid, correctly-scoped
+    session is still not enough to rewrite the roster or grant themselves
+    (or someone else) admin access."""
+    session = require_session(token, company_id=company_id)
     if session["kind"] == "platform":
-        return
-    if company_id is not None and session.get("company_id") != company_id:
-        raise HTTPException(status_code=401, detail="This session isn't signed in to that company.")
+        return session
+    actor = db.get(Persona, (company_id, session.get("persona_id")))
+    if not actor or not actor.is_org_admin:
+        raise HTTPException(status_code=403, detail="Only a team admin can change the roster.")
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -190,17 +175,17 @@ def _slugify(name: str) -> str:
 # Company snapshot + login + staff console listing
 # ---------------------------------------------------------------------------
 @router.get("/companies/{company_id}")
-def get_company(company_id: str, token: Optional[str] = None):
-    _require_session(token, company_id=company_id)
+def get_company(company_id: str, request: Request, token: Optional[str] = None):
+    _require_session(token_from_request(request, token), company_id=company_id)
     with get_session() as db:
         company = _get_company_or_404(db, company_id)
         return _company_snapshot(db, company)
 
 
 @router.get("/platform/companies")
-def list_companies(token: Optional[str] = None):
-    session = _SESSIONS.get(token) if token else None
-    if not session or session["kind"] != "platform":
+def list_companies(request: Request, token: Optional[str] = None):
+    session = require_session(token_from_request(request, token))
+    if session["kind"] != "platform":
         raise HTTPException(status_code=401, detail="Cognex staff sign-in required.")
     with get_session() as db:
         companies = db.execute(select(Company)).scalars().all()
@@ -223,18 +208,35 @@ class LoginRequest(BaseModel):
 @router.post("/login")
 def login(req: LoginRequest):
     email = req.email.strip().lower()
+    check_login_lockout(email)
     if email == STAFF_EMAIL:
         if req.password != STAFF_PASSWORD:
+            record_login_failure(email)
             raise HTTPException(status_code=401, detail="Incorrect password for Cognex staff.")
+        clear_login_failures(email)
         return {"type": "platform", "token": _issue_token("platform")}
 
     with get_session() as db:
         persona = db.execute(select(Persona).where(Persona.email == email)).scalars().first()
         if not persona or req.password != DEMO_PASSWORD:
+            record_login_failure(email)
             raise HTTPException(status_code=401, detail="No matching account, or the password's wrong.")
+        clear_login_failures(email)
         company = _get_company_or_404(db, persona.company_id)
         token = _issue_token("company", company_id=company.id, persona_id=persona.id)
         return {"type": "company", "companyId": company.id, "personaId": persona.id, "token": token, "company": _company_snapshot(db, company)}
+
+
+@router.post("/logout")
+def logout(request: Request, token: Optional[str] = None):
+    # Added alongside real session expiry (auth.py) -- "logout" used to only
+    # ever clear the browser's local storage; the server-side token stayed
+    # valid (forever, since tokens didn't expire either) whether or not
+    # anyone was still using it. Deliberately doesn't 401 on an unknown/
+    # already-expired token -- logging out twice, or logging out after the
+    # token already expired on its own, isn't an error.
+    revoke_token(token_from_request(request, token))
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +297,9 @@ class PersonaIn(BaseModel):
 
 
 @router.post("/companies/{company_id}/personas")
-def add_persona(company_id: str, req: PersonaIn):
+def add_persona(company_id: str, req: PersonaIn, request: Request, token: Optional[str] = None):
     with get_session() as db:
-        company = _get_company_or_404(db, company_id)
+        _require_admin_session(db, token_from_request(request, token), company_id)
         pid = req.id or _slugify(req.name)
         if db.get(Persona, (company_id, pid)):
             base, n = pid, 1
@@ -319,8 +321,9 @@ def add_persona(company_id: str, req: PersonaIn):
 
 
 @router.put("/companies/{company_id}/personas/{persona_id}")
-def update_persona(company_id: str, persona_id: str, req: PersonaIn):
+def update_persona(company_id: str, persona_id: str, req: PersonaIn, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_admin_session(db, token_from_request(request, token), company_id)
         p = db.get(Persona, (company_id, persona_id))
         if not p:
             raise HTTPException(status_code=404, detail="No such persona.")
@@ -331,12 +334,19 @@ def update_persona(company_id: str, persona_id: str, req: PersonaIn):
 
 
 @router.delete("/companies/{company_id}/personas/{persona_id}")
-def delete_persona(company_id: str, persona_id: str, acting_persona_id: Optional[str] = None):
+def delete_persona(company_id: str, persona_id: str, request: Request, token: Optional[str] = None, acting_persona_id: Optional[str] = None):
     with get_session() as db:
+        session = _require_admin_session(db, token_from_request(request, token), company_id)
+        # The session's own persona_id (when it has one -- a platform/staff
+        # session doesn't) is what actually identifies "who's acting" now;
+        # the client-supplied acting_persona_id is kept only as the fallback
+        # a staff session has no persona identity of its own to check
+        # against, not trusted over the session for a real company login.
+        acting_id = session.get("persona_id") or acting_persona_id
         p = db.get(Persona, (company_id, persona_id))
         if not p:
             raise HTTPException(status_code=404, detail="No such persona.")
-        if acting_persona_id == persona_id:
+        if acting_id == persona_id:
             raise HTTPException(status_code=400, detail="You can't remove your own account while signed in as them.")
         if p.is_org_admin:
             admin_count = len(db.execute(select(Persona).where(Persona.company_id == company_id, Persona.is_org_admin == True)).scalars().all())  # noqa: E712
@@ -380,8 +390,9 @@ class DecisionIn(BaseModel):
 
 
 @router.post("/companies/{company_id}/decisions")
-def add_decision(company_id: str, req: DecisionIn):
+def add_decision(company_id: str, req: DecisionIn, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         _get_company_or_404(db, company_id)
         did = req.id or f"d-{_slugify(req.title)}"
         if db.get(Decision, (company_id, did)):
@@ -421,8 +432,9 @@ class DecisionUpdateIn(BaseModel):
 
 
 @router.put("/companies/{company_id}/decisions/{decision_id}")
-def update_decision(company_id: str, decision_id: str, req: DecisionUpdateIn):
+def update_decision(company_id: str, decision_id: str, req: DecisionUpdateIn, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         d = db.get(Decision, (company_id, decision_id))
         if not d:
             raise HTTPException(status_code=404, detail="No such decision.")
@@ -445,7 +457,7 @@ def update_decision(company_id: str, decision_id: str, req: DecisionUpdateIn):
 
 
 @router.delete("/companies/{company_id}/decisions/{decision_id}")
-def delete_decision(company_id: str, decision_id: str):
+def delete_decision(company_id: str, decision_id: str, request: Request, token: Optional[str] = None):
     # Added 2026-08-30 for the Brain Board: deleting a whole node off the
     # board (the founder's explicit scope choice — whole entries only, not
     # individual facts within one). Extended 2026-08-31, mirroring
@@ -454,6 +466,7 @@ def delete_decision(company_id: str, decision_id: str):
     # leaving its branches pointing at a parent that no longer exists would
     # silently orphan them rather than just removing what was asked for.
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         d = db.get(Decision, (company_id, decision_id))
         if not d:
             raise HTTPException(status_code=404, detail="No such decision.")
@@ -490,7 +503,7 @@ class DecisionSplitIn(BaseModel):
 
 
 @router.post("/companies/{company_id}/decisions/{decision_id}/split")
-def split_decision(company_id: str, decision_id: str, req: DecisionSplitIn):
+def split_decision(company_id: str, decision_id: str, req: DecisionSplitIn, request: Request, token: Optional[str] = None):
     # Added 2026-08-31 for the Brain Board's "split" consolidation action
     # (see live.py's plan_memory_split) — a node that's absorbed too many
     # genuinely distinct sub-topics gets broken apart into 2-4 sharper
@@ -503,6 +516,7 @@ def split_decision(company_id: str, decision_id: str, req: DecisionSplitIn):
     if not req.children:
         raise HTTPException(status_code=400, detail="A split needs at least one child node.")
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         d = db.get(Decision, (company_id, decision_id))
         if not d:
             raise HTTPException(status_code=404, detail="No such decision.")
@@ -555,8 +569,9 @@ class GoalIn(BaseModel):
 
 
 @router.post("/companies/{company_id}/goals")
-def add_goal(company_id: str, req: GoalIn):
+def add_goal(company_id: str, req: GoalIn, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         _get_company_or_404(db, company_id)
         gid = req.id or f"g-{_slugify(req.title)}"
         if db.get(Goal, (company_id, gid)):
@@ -581,8 +596,9 @@ class GoalUpdateIn(BaseModel):
 
 
 @router.put("/companies/{company_id}/goals/{goal_id}")
-def update_goal(company_id: str, goal_id: str, req: GoalUpdateIn):
+def update_goal(company_id: str, goal_id: str, req: GoalUpdateIn, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         g = db.get(Goal, (company_id, goal_id))
         if not g:
             raise HTTPException(status_code=404, detail="No such goal.")
@@ -599,7 +615,7 @@ def update_goal(company_id: str, goal_id: str, req: GoalUpdateIn):
 
 
 @router.delete("/companies/{company_id}/goals/{goal_id}")
-def delete_goal(company_id: str, goal_id: str):
+def delete_goal(company_id: str, goal_id: str, request: Request, token: Optional[str] = None):
     # Added 2026-08-30 alongside the founder-facing "add a goal" UI — until
     # now goals only ever existed as seed data, so nothing needed deleting.
     # Cascades to descendants: a goal's whole reason for being is its place
@@ -608,6 +624,7 @@ def delete_goal(company_id: str, goal_id: str):
     # parent that no longer exists would silently break that trace rather
     # than just removing what the admin asked to remove.
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         g = db.get(Goal, (company_id, goal_id))
         if not g:
             raise HTTPException(status_code=404, detail="No such goal.")
@@ -642,11 +659,19 @@ def _now_iso() -> str:
 
 
 @router.get("/companies/{company_id}/personas/{persona_id}/threads")
-def list_threads(company_id: str, persona_id: str):
+def list_threads(company_id: str, persona_id: str, request: Request, token: Optional[str] = None):
     """Fetched once on login/session start so a persona's chat history is
     there from the first render, instead of every session starting with an
-    empty sidebar the way it did before this endpoint existed."""
+    empty sidebar the way it did before this endpoint existed.
+
+    Scoped with require_persona_session, not just require_session -- a chat
+    thread is private to the one person who had the conversation, not
+    readable by any other signed-in member of the same company (that was
+    part of the full-app-audit-2026-09-02 critical finding: literally
+    anyone could read or overwrite any employee's private Ask Cognex
+    history with zero credential)."""
     with get_session() as db:
+        require_persona_session(token_from_request(request, token), company_id, persona_id)
         rows = db.execute(
             select(ChatThread)
             .where(ChatThread.company_id == company_id, ChatThread.persona_id == persona_id)
@@ -662,7 +687,7 @@ class ThreadUpsertIn(BaseModel):
 
 
 @router.put("/companies/{company_id}/personas/{persona_id}/threads/{thread_id}")
-def upsert_thread(company_id: str, persona_id: str, thread_id: str, req: ThreadUpsertIn):
+def upsert_thread(company_id: str, persona_id: str, thread_id: str, req: ThreadUpsertIn, request: Request, token: Optional[str] = None):
     """Upsert, not separate create/update — the frontend always knows the
     thread id it's writing (it mints one client-side the moment a new chat
     is started, same as it already does for decisions/goals), so one
@@ -674,6 +699,7 @@ def upsert_thread(company_id: str, persona_id: str, thread_id: str, req: ThreadU
     rendering, this is a best-effort mirror so a reload has something real
     to restore from."""
     with get_session() as db:
+        require_persona_session(token_from_request(request, token), company_id, persona_id)
         _get_company_or_404(db, company_id)
         t = db.get(ChatThread, (company_id, persona_id, thread_id))
         if not t:
@@ -687,8 +713,9 @@ def upsert_thread(company_id: str, persona_id: str, thread_id: str, req: ThreadU
 
 
 @router.delete("/companies/{company_id}/personas/{persona_id}/threads/{thread_id}")
-def delete_thread(company_id: str, persona_id: str, thread_id: str):
+def delete_thread(company_id: str, persona_id: str, thread_id: str, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        require_persona_session(token_from_request(request, token), company_id, persona_id)
         t = db.get(ChatThread, (company_id, persona_id, thread_id))
         if not t:
             return {"ok": True}  # already gone — deleting twice isn't an error
@@ -721,8 +748,9 @@ class HandoffIn(BaseModel):
 
 
 @router.post("/companies/{company_id}/handoffs")
-def create_handoff(company_id: str, req: HandoffIn):
+def create_handoff(company_id: str, req: HandoffIn, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         _get_company_or_404(db, company_id)
         h = Handoff(
             company_id=company_id, id=req.id,
@@ -742,12 +770,13 @@ class HandoffUpdateIn(BaseModel):
 
 
 @router.put("/companies/{company_id}/handoffs/{handoff_id}")
-def update_handoff(company_id: str, handoff_id: str, req: HandoffUpdateIn):
+def update_handoff(company_id: str, handoff_id: str, req: HandoffUpdateIn, request: Request, token: Optional[str] = None):
     """Covers both mutation paths the frontend has: assignDelegationItem
     (rewrites delegationItems + bumps status to "delegating") and
     finishHandoff (sets status to "done") — both just PUT whatever changed,
     same partial-update shape as update_goal above."""
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         h = db.get(Handoff, (company_id, handoff_id))
         if not h:
             raise HTTPException(status_code=404, detail="No such handoff.")
@@ -760,8 +789,9 @@ def update_handoff(company_id: str, handoff_id: str, req: HandoffUpdateIn):
 
 
 @router.get("/companies/{company_id}/handoffs")
-def list_handoffs(company_id: str):
+def list_handoffs(company_id: str, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         rows = db.execute(
             select(Handoff).where(Handoff.company_id == company_id).order_by(Handoff.created_at.desc())
         ).scalars().all()
@@ -816,8 +846,9 @@ def _write_ledger_entries(db, company_id: str, entries: list):
 
 
 @router.post("/companies/{company_id}/ledger")
-def create_ledger_entry(company_id: str, req: LedgerEntryIn):
+def create_ledger_entry(company_id: str, req: LedgerEntryIn, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         _get_company_or_404(db, company_id)
         _write_ledger_entries(db, company_id, [req])
         return {"ok": True}
@@ -828,8 +859,9 @@ class LedgerBulkIn(BaseModel):
 
 
 @router.post("/companies/{company_id}/ledger/bulk")
-def create_ledger_entries_bulk(company_id: str, req: LedgerBulkIn):
+def create_ledger_entries_bulk(company_id: str, req: LedgerBulkIn, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         _get_company_or_404(db, company_id)
         if req.entries:
             _write_ledger_entries(db, company_id, req.entries)
@@ -837,8 +869,9 @@ def create_ledger_entries_bulk(company_id: str, req: LedgerBulkIn):
 
 
 @router.get("/companies/{company_id}/ledger")
-def list_ledger(company_id: str):
+def list_ledger(company_id: str, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         rows = db.execute(
             select(LedgerEntry).where(LedgerEntry.company_id == company_id).order_by(LedgerEntry.ts.desc()).limit(500)
         ).scalars().all()
@@ -906,7 +939,8 @@ def _document_json(d: Document) -> dict:
 
 
 @router.post("/companies/{company_id}/documents")
-async def upload_document(company_id: str, file: UploadFile = File(...), uploadedBy: str = Form("")):
+async def upload_document(company_id: str, request: Request, file: UploadFile = File(...), uploadedBy: str = Form("")):
+    _require_session(token_from_request(request), company_id=company_id)
     content = await file.read()
     if len(content) > DOCUMENT_MAX_BYTES:
         raise HTTPException(
@@ -929,8 +963,9 @@ async def upload_document(company_id: str, file: UploadFile = File(...), uploade
 
 
 @router.get("/companies/{company_id}/documents")
-def list_documents(company_id: str):
+def list_documents(company_id: str, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         rows = db.execute(
             select(Document).where(Document.company_id == company_id).order_by(Document.uploaded_at.desc())
         ).scalars().all()
@@ -938,8 +973,9 @@ def list_documents(company_id: str):
 
 
 @router.delete("/companies/{company_id}/documents/{document_id}")
-def delete_document(company_id: str, document_id: str):
+def delete_document(company_id: str, document_id: str, request: Request, token: Optional[str] = None):
     with get_session() as db:
+        _require_session(token_from_request(request, token), company_id=company_id)
         d = db.get(Document, document_id)
         if not d or d.company_id != company_id:
             return {"ok": True}  # already gone (or never belonged to this company) — deleting twice isn't an error

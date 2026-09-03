@@ -49,18 +49,57 @@ Architecture, and why it's shaped this way:
 
 import os
 import json
+import secrets
+import time
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from anthropic import Anthropic
 
+from auth import require_session, token_from_request
 from db import get_conn
 
 router = APIRouter(prefix="/api/integrations/slack")
+
+# ---------------------------------------------------------------------------
+# OAuth CSRF protection — added 2026-09-03 (full-app-audit-2026-09-02 high
+# finding). /authorize used to pass the plaintext company_id straight
+# through as the OAuth `state` param with no server-side nonce at all: an
+# attacker could run their own OAuth grant against their own Slack
+# workspace, then call OUR /callback with state=<victim-company-id>,
+# silently overwriting that victim's real Slack connection with the
+# attacker's token — a complete hijack with zero interaction from the
+# victim. Now /authorize mints a random, single-use, short-lived nonce
+# mapped to the company_id it was actually issued for; /callback looks the
+# nonce up and rejects anything it doesn't recognize, so a state value has
+# to have come from a real, freshly-issued /authorize call for that exact
+# company. Same in-memory-dict trade-off as the rest of this app's session
+# state (see auth.py) — sufficient for a flow that's only ever alive for
+# the few minutes between clicking "Connect Slack" and the popup closing.
+# ---------------------------------------------------------------------------
+_OAUTH_STATE: dict = {}  # nonce -> {"company_id": str, "expires_at": float}
+_OAUTH_STATE_TTL_SECONDS = 10 * 60
+
+
+def _issue_oauth_state(company_id: str) -> str:
+    nonce = secrets.token_urlsafe(24)
+    _OAUTH_STATE[nonce] = {"company_id": company_id, "expires_at": time.time() + _OAUTH_STATE_TTL_SECONDS}
+    return nonce
+
+
+def _consume_oauth_state(nonce: str) -> Optional[str]:
+    """One-time use: a nonce is removed as soon as it's looked up, whether
+    or not it turns out to be valid, so a captured callback URL can't be
+    replayed."""
+    entry = _OAUTH_STATE.pop(nonce, None)
+    if not entry or entry["expires_at"] < time.time():
+        return None
+    return entry["company_id"]
 
 SLACK_CLIENT_ID = os.environ.get("SLACK_CLIENT_ID", "")
 SLACK_CLIENT_SECRET = os.environ.get("SLACK_CLIENT_SECRET", "")
@@ -82,7 +121,8 @@ def _configured():
 
 
 @router.get("/status")
-def status(company_id: str):
+def status(company_id: str, request: Request, token: Optional[str] = None):
+    require_session(token_from_request(request, token), company_id=company_id)
     # "configured" = the server has Slack app credentials set up at all (gates
     # whether "Connect" can start a new OAuth flow). "connected" is read from
     # the DB independent of that — a company that already has a stored token
@@ -112,13 +152,22 @@ def status(company_id: str):
 
 
 @router.get("/authorize")
-def authorize(company_id: str):
+def authorize(company_id: str, request: Request, token: Optional[str] = None):
+    # This route is reached by a top-level browser navigation (slackConnect's
+    # window.open popup, not a fetch/XHR call), so it can't carry an
+    # Authorization header the way every other route in this app now does —
+    # ?token= here is the one deliberate exception (see auth.py's module
+    # docstring). Still required: without a valid session scoped to this
+    # exact company_id, starting the OAuth flow (and therefore being able to
+    # connect to any company's Slack) isn't allowed at all.
+    require_session(token_from_request(request, token), company_id=company_id)
     if not _configured():
         raise HTTPException(status_code=503, detail="Slack is not configured on the server yet.")
+    state = _issue_oauth_state(company_id)
     url = (
         "https://slack.com/oauth/v2/authorize"
         f"?client_id={SLACK_CLIENT_ID}&scope={BOT_SCOPES}"
-        f"&redirect_uri={SLACK_REDIRECT_URI}&state={company_id}"
+        f"&redirect_uri={SLACK_REDIRECT_URI}&state={state}"
     )
     return RedirectResponse(url)
 
@@ -133,6 +182,15 @@ def callback(code: str = "", state: str = "", error: str = ""):
     )
     if error or not code:
         return page(f"Slack connection failed: {error or 'no code returned'}. Close this tab and try again.")
+    # Resolves the real company_id from the nonce /authorize issued —
+    # NEVER trusts `state` itself as a company_id (see the CSRF comment
+    # above this file's _OAUTH_STATE). An unrecognized/expired/already-used
+    # nonce means this callback didn't originate from a /authorize call this
+    # server actually issued moments ago, so it's rejected outright rather
+    # than connecting Slack to whatever company an attacker named.
+    company_id = _consume_oauth_state(state)
+    if not company_id:
+        return page("This Slack connection link has expired or was already used. Close this tab and click Connect Slack again.")
     resp = httpx.post(
         "https://slack.com/api/oauth.v2.access",
         data={
@@ -154,7 +212,7 @@ def callback(code: str = "", state: str = "", error: str = ""):
         "ON CONFLICT(company_id) DO UPDATE SET team_id=excluded.team_id, team_name=excluded.team_name, "
         "access_token=excluded.access_token, connected_at=excluded.connected_at",
         (
-            state,
+            company_id,
             data["team"]["id"],
             data["team"]["name"],
             data["access_token"],
@@ -168,7 +226,8 @@ def callback(code: str = "", state: str = "", error: str = ""):
 
 
 @router.post("/disconnect")
-def disconnect(company_id: str):
+def disconnect(company_id: str, request: Request, token: Optional[str] = None):
+    require_session(token_from_request(request, token), company_id=company_id)
     conn = get_conn()
     conn.execute("DELETE FROM slack_connections WHERE company_id=?", (company_id,))
     conn.commit()
@@ -194,7 +253,8 @@ class SyncRequest(BaseModel):
 
 
 @router.post("/sync")
-def sync(req: SyncRequest):
+def sync(req: SyncRequest, request: Request):
+    require_session(token_from_request(request), company_id=req.company_id)
     conn = get_conn()
     row = conn.execute(
         "SELECT access_token FROM slack_connections WHERE company_id=?", (req.company_id,)
@@ -316,7 +376,8 @@ class ExtractRequest(BaseModel):
 
 
 @router.post("/extract")
-def extract(req: ExtractRequest):
+def extract(req: ExtractRequest, request: Request):
+    require_session(token_from_request(request), company_id=req.company_id)
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
 
@@ -377,7 +438,8 @@ def extract(req: ExtractRequest):
 
 
 @router.get("/candidates")
-def list_candidates(company_id: str):
+def list_candidates(company_id: str, request: Request, token: Optional[str] = None):
+    require_session(token_from_request(request, token), company_id=company_id)
     conn = get_conn()
     rows = conn.execute(
         "SELECT * FROM slack_candidates WHERE company_id=? AND status='pending' ORDER BY created_at DESC",
@@ -404,7 +466,8 @@ class CandidateActionRequest(BaseModel):
 
 
 @router.post("/candidates/{candidate_id}/dismiss")
-def dismiss_candidate(candidate_id: str, req: CandidateActionRequest):
+def dismiss_candidate(candidate_id: str, req: CandidateActionRequest, request: Request):
+    require_session(token_from_request(request), company_id=req.company_id)
     conn = get_conn()
     conn.execute(
         "UPDATE slack_candidates SET status='dismissed' WHERE id=? AND company_id=?",
@@ -416,7 +479,8 @@ def dismiss_candidate(candidate_id: str, req: CandidateActionRequest):
 
 
 @router.post("/candidates/{candidate_id}/confirm")
-def confirm_candidate(candidate_id: str, req: CandidateActionRequest):
+def confirm_candidate(candidate_id: str, req: CandidateActionRequest, request: Request):
+    require_session(token_from_request(request), company_id=req.company_id)
     conn = get_conn()
     row = conn.execute(
         "SELECT * FROM slack_candidates WHERE id=? AND company_id=?", (candidate_id, req.company_id)

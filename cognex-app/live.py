@@ -36,10 +36,12 @@ import base64
 import uuid
 
 from anthropic import Anthropic
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel
+
+from auth import require_any_session, require_session, token_from_request
 
 # Added 2026-08-31 for the company Document Library's search_documents/
 # get_document tools (and the "doc-" branch of GET /api/files/{file_id}
@@ -54,6 +56,7 @@ from pydantic import BaseModel
 # document lookups; nothing else in this file gains DB access through this.
 from db_postgres import get_session
 from models import Document
+from models import Persona as DBPersona
 from sqlalchemy import select
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
@@ -1091,28 +1094,79 @@ class AskRequest(BaseModel):
     company_id: str = ""
 
 
+def _resolve_ask_identity(req: "AskRequest", request: Request, token: Optional[str]):
+    """Resolves the actual company_id and persona an /ask (or /ask/stream)
+    call is allowed to use, from the AUTHENTICATED session — not from
+    whatever the client's request body claims. Added 2026-09-03 after the
+    full-app-audit-2026-09-02 critical/high findings: previously nothing
+    stopped a request from claiming any persona.level (including 6, CEO
+    only) and any company_id, with zero credential of any kind — which both
+    bypassed clearance filtering entirely (permissions.py's level check is
+    only as trustworthy as the level it's given) and let an attacker point
+    the per-company rate limit/cost cap at a victim company just by naming
+    it.
+
+    A company session resolves BOTH company_id and persona from the session
+    itself, ignoring whatever the client sent for either — this is the
+    normal login path, and the one this fix actually closes.
+
+    A platform (staff) session — "Enter as support" — has no company_id or
+    persona identity of its own; staff is deliberately impersonating
+    whichever admin persona the frontend already picked when previewing a
+    company's account (see renderPlatform's "Enter as support" in
+    static/index.html), so that one case still trusts the client's
+    company_id/persona, matching the existing support-preview flow exactly
+    as it worked before this pass.
+
+    Decisions/goals are still always taken from the request body either
+    way — this module's whole design (see the file's own docstring) is
+    that the client supplies its current company snapshot per request;
+    nothing server-side stores one centrally for /ask to look up instead."""
+    session = require_session(token_from_request(request, token))
+    if session["kind"] == "platform":
+        return req.company_id, req.persona
+    company_id = session.get("company_id") or req.company_id
+    with get_session() as db:
+        row = db.get(DBPersona, (company_id, session.get("persona_id")))
+    if not row:
+        raise HTTPException(status_code=401, detail="Your session's account could not be found — try signing in again.")
+    return company_id, PersonaIn(id=row.id, name=row.name, title=row.title, level=row.level, dept=row.dept or "")
+
+
 @router.get("/health")
 def health():
     return {"ok": True, "api_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY"))}
 
 
 @router.get("/files/{file_id}")
-def get_generated_file(file_id: str):
+def get_generated_file(file_id: str, request: Request, token: Optional[str] = None):
     """Streams back a file code_execution generated (a chart image, a CSV,
     etc.) by proxying Anthropic's Files API through our own server API key —
-    the frontend never talks to Anthropic directly. NOTE on scope: like the
-    rest of this app, this isn't access-controlled per company/persona (any
-    caller who has a file_id can fetch it) — that's consistent with this
-    app's documented "no real auth yet" state (see the persistence build-log
-    entry) and these ids are opaque, short-lived, and only ever handed to the
-    same session that asked the question that generated them. Real per-user
-    file access control is part of the same future "real authentication"
-    phase already tracked for the rest of the app.
+    the frontend never talks to Anthropic directly.
+
+    Auth, tightened 2026-09-03 (full-app-audit-2026-09-02 critical finding:
+    this route had NO company scoping at all — any caller who had or
+    guessed a "doc-" id could download a different company's uploaded
+    documents straight out of the library, with zero credential). Every
+    branch now requires SOME valid, signed-in session before serving
+    anything at all. The "doc-" branch (a real company document-library
+    upload — the one that can hold genuinely confidential files) goes
+    further and requires that session be scoped to the SAME company the
+    document belongs to, exactly like every other company-data route.
+
+    The "img-" and raw-Anthropic-file-id branches below still aren't scoped
+    to a specific company — neither the in-process image store nor
+    Anthropic's Files API records which company generated a given id, so
+    there's nothing to check it against yet. Requiring a valid session at
+    all (rather than none) closes the fully-anonymous version of this gap;
+    threading company_id through image/code_execution file storage too is a
+    further hardening step, not done in this pass.
 
     An "img-" prefixed id is an OpenAI-generated image served straight out of
     the in-process _GENERATED_IMAGES store (see the image-generation block
     near the top of this file) rather than Anthropic's Files API — those ids
     never existed on Anthropic's side at all."""
+    require_any_session(token_from_request(request, token))
     if file_id.startswith("img-"):
         rec = _GENERATED_IMAGES.get(file_id)
         if not rec:
@@ -1134,6 +1188,7 @@ def get_generated_file(file_id: str):
             d = db.get(Document, file_id)
         if not d:
             raise HTTPException(status_code=404, detail=f"Document '{file_id}' was not found — it may have been deleted.")
+        require_session(token_from_request(request, token), company_id=d.company_id)
         return Response(
             content=d.content_bytes,
             media_type=d.mime_type or "application/octet-stream",
@@ -1156,11 +1211,16 @@ def get_generated_file(file_id: str):
 
 
 @router.post("/ask")
-def ask(req: AskRequest):
+def ask(req: AskRequest, request: Request, token: Optional[str] = None):
+    # Auth checked FIRST, before even the API-key/503 check below -- an
+    # unauthenticated caller shouldn't learn anything about the server's
+    # configuration state, and this is the one place a real 401 can reach
+    # the client for this route (see the try/except's own reasoning below).
+    req.company_id, req.persona = _resolve_ask_identity(req, request, token)
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
     # Deliberately BEFORE the try/except below: an HTTPException raised here
-    # (429 rate-limited or over the monthly cost cap) must reach the client
+    # (429 rate-limited, or over the monthly cost cap) must reach the client
     # as-is. Inside the try/except it would get caught by `except Exception`
     # and rewritten into a misleading 502 "Model call failed".
     _check_rate_limit(req.company_id)
@@ -1175,7 +1235,7 @@ def ask(req: AskRequest):
 
 
 @router.post("/ask/stream")
-def ask_stream(req: AskRequest):
+def ask_stream(req: AskRequest, request: Request, token: Optional[str] = None):
     """Same request/response contract as POST /ask, but streamed as
     Server-Sent Events instead of one blocking JSON response — added
     2026-08-29 so Ask Cognex can type its answer out live and show real,
@@ -1192,13 +1252,14 @@ def ask_stream(req: AskRequest):
     `{"event": "error", ...}` frame — see submitQuestionStreaming's error
     handling in the frontend, which renders this exactly like the existing
     offline-fallback path a non-streaming failure already produces."""
+    # Auth checked FIRST, same reasoning as POST /ask -- synchronously,
+    # BEFORE the API-key check and BEFORE the StreamingResponse is ever
+    # constructed. This is the one place a real 401/429 can still reach the
+    # client for this route, since once the SSE response starts, only
+    # {"event": "error"} frames are possible (see the docstring above).
+    req.company_id, req.persona = _resolve_ask_identity(req, request, token)
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
-    # Same reasoning as POST /ask: checked here, synchronously, BEFORE the
-    # StreamingResponse is ever constructed — this is the one place a real
-    # 429 can still reach the client for this route, since once the SSE
-    # response starts, only {"event": "error"} frames are possible (see the
-    # docstring above).
     _check_rate_limit(req.company_id)
     _check_cost_cap(req.company_id)
     persona = Persona(**req.persona.model_dump())
@@ -1362,7 +1423,13 @@ class StoryQuestionsRequest(BaseModel):
 
 
 @router.post("/complete-story/questions")
-def complete_story_questions(req: StoryQuestionsRequest):
+def complete_story_questions(req: StoryQuestionsRequest, request: Request, token: Optional[str] = None):
+    # Added 2026-09-03 (full-app-audit-2026-09-02 finding): this endpoint has
+    # no company_id to scope against -- everything it needs comes straight
+    # off the request body (see this module's docstring on that design) --
+    # but it still shouldn't be reachable with zero credential at all. Same
+    # reasoning on every other route below with no company_id field.
+    require_any_session(token_from_request(request, token))
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
     try:
@@ -1517,9 +1584,20 @@ CONSOLIDATE_MEMORY_SCHEMA = {
             "summary": {
                 "type": "string",
                 "description": (
-                    "One coherent paragraph describing everything currently known about this topic, "
-                    "written fresh to incorporate the new information — not the old summary with the "
-                    "new fact bolted on. Ignored when action is 'split'."
+                    "The DERIVED summary for this topic — NOT a private record. This is what a viewer "
+                    "BELOW the source content's own clearance level sees instead of the raw why/"
+                    "alternatives/risks (see decisionView's source-vs-derived split in the frontend); by "
+                    "default a new save is visible company-wide regardless of how sensitive the "
+                    "underlying content is, so treat every summary you write as something the most "
+                    "junior person at the company will read. Describe the ORGANIZATIONAL CONSEQUENCE — "
+                    "what this means or what changes for other people's work — one coherent paragraph, "
+                    "written fresh to incorporate the new information, not the old summary with the new "
+                    "fact bolted on. Do NOT restate confidential financial figures or specific dollar "
+                    "amounts, named third parties (people, companies, candidates under consideration), "
+                    "or the detailed private reasoning behind a sensitive call — that detail stays in the "
+                    "source record this summary is standing in for, not repeated here. When genuinely "
+                    "unsure whether a detail is safe to include, leave it out; a vaguer summary is always "
+                    "safer than a leaked one. Ignored when action is 'split'."
                 ),
             },
             "tags": {
@@ -1596,7 +1674,15 @@ def consolidate_memory(candidates: list, new_content: dict) -> dict:
             "merging the new information into it would blur together things that genuinely deserve "
             "separate nodes — this should be rare; most saves should merge or branch, not split. The "
             "board should stay small and legible: the more nodes already exist in a department, the "
-            "harder you should lean toward merge/branch over creating something new."
+            "harder you should lean toward merge/branch over creating something new.\n\n"
+            "CRITICAL — the `summary` field is a REDACTION step, not a recap: it becomes the ONLY "
+            "version of this topic that a lower-clearance viewer ever sees (this board defaults new "
+            "saves to company-wide visibility regardless of how sensitive the source content is), while "
+            "the confidential detail behind it — financial figures, named people or companies, the "
+            "private reasoning — stays only in the source record, which this summary must NOT restate. "
+            "Write what changed or what it means for people's work, never the confidential substance "
+            "behind it. Treat this as true for every save, not just ones that look obviously sensitive — "
+            "the safest default is less detail, not more."
         ),
         tools=[CONSOLIDATE_MEMORY_SCHEMA],
         tool_choice={"type": "tool", "name": "submit_memory_consolidation"},
@@ -1747,7 +1833,8 @@ class TidyBoardRequest(BaseModel):
 
 
 @router.post("/board/tidy")
-def board_tidy(req: TidyBoardRequest):
+def board_tidy(req: TidyBoardRequest, request: Request, token: Optional[str] = None):
+    require_any_session(token_from_request(request, token))
     if not req.topics:
         return {"topics": []}
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -1772,7 +1859,11 @@ SPLIT_MEMORY_SCHEMA = {
                 "type": "string",
                 "description": (
                     "A SHORT umbrella description of this broader topic now that its detail lives in the "
-                    "children below — not a repeat of any one child's content."
+                    "children below — not a repeat of any one child's content. This becomes the DERIVED "
+                    "summary a lower-clearance viewer sees instead of the raw record (this board defaults "
+                    "to company-wide visibility regardless of source sensitivity) — describe what the "
+                    "topic area covers, never confidential figures, named third parties, or private "
+                    "reasoning from the underlying history."
                 ),
             },
             "trunk_tags": {"type": "array", "items": {"type": "string"}, "description": "3-6 broad tags for the umbrella topic."},
@@ -1784,7 +1875,7 @@ SPLIT_MEMORY_SCHEMA = {
                     "type": "object",
                     "properties": {
                         "title": {"type": "string", "description": "A short, sharp title for this sub-topic."},
-                        "summary": {"type": "string", "description": "One coherent paragraph describing everything known about this specific sub-topic."},
+                        "summary": {"type": "string", "description": "The DERIVED summary for this sub-topic — the ONLY version a lower-clearance viewer sees (company-wide by default). Describe the organizational consequence of this sub-topic in one coherent paragraph; never restate confidential financial figures, named third parties, or the detailed private reasoning behind it — that detail stays in the source why[] lines this summary stands in for."},
                         "tags": {"type": "array", "items": {"type": "string"}, "description": "3-8 short lowercase tags."},
                         "why_indices": {
                             "type": "array",
@@ -1837,7 +1928,12 @@ def plan_memory_split(target: dict, new_content: dict) -> dict:
             "sub-nodes. Every existing why[] line must end up assigned to exactly one child — read each "
             "line and group it by which specific sub-topic it's really about. trunk_summary should be "
             "short and umbrella-level now that detail lives in the children, not a copy of any one "
-            "child's content."
+            "child's content.\n\n"
+            "CRITICAL — every summary field here (trunk_summary and each child's summary) is a "
+            "REDACTION step, not a recap: it becomes the ONLY version of that topic a lower-clearance "
+            "viewer ever sees, while confidential figures, named parties, and private reasoning stay "
+            "only in the source why[] lines, which these summaries must not restate. Describe "
+            "organizational consequence, never confidential substance — when unsure, leave it out."
         ),
         tools=[SPLIT_MEMORY_SCHEMA],
         tool_choice={"type": "tool", "name": "submit_memory_split"},
@@ -1900,7 +1996,8 @@ class ConsolidateMemoryRequest(BaseModel):
 
 
 @router.post("/memory/consolidate")
-def memory_consolidate(req: ConsolidateMemoryRequest):
+def memory_consolidate(req: ConsolidateMemoryRequest, request: Request, token: Optional[str] = None):
+    require_any_session(token_from_request(request, token))
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
     try:
@@ -1924,7 +2021,7 @@ class SplitMemoryRequest(BaseModel):
 
 
 @router.post("/memory/split_plan")
-def memory_split_plan(req: SplitMemoryRequest):
+def memory_split_plan(req: SplitMemoryRequest, request: Request, token: Optional[str] = None):
     # The second call in the split path (see plan_memory_split's own
     # docstring for why this is a separate endpoint from /memory/consolidate
     # rather than one bigger call) — the frontend only calls this after
@@ -1932,6 +2029,7 @@ def memory_split_plan(req: SplitMemoryRequest):
     # the target node's FULL why[] history (already held client-side in
     # company.decisions, never re-fetched) since that's what a real split
     # decision needs to read.
+    require_any_session(token_from_request(request, token))
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
     try:
@@ -1946,7 +2044,8 @@ class StoryExtractRequest(BaseModel):
 
 
 @router.post("/complete-story/extract")
-def complete_story_extract(req: StoryExtractRequest):
+def complete_story_extract(req: StoryExtractRequest, request: Request, token: Optional[str] = None):
+    require_any_session(token_from_request(request, token))
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
     from extract import draft_decision_from_story
@@ -2107,7 +2206,8 @@ class OffboardingQuestionsRequest(BaseModel):
 
 
 @router.post("/offboarding/questions")
-def offboarding_questions(req: OffboardingQuestionsRequest):
+def offboarding_questions(req: OffboardingQuestionsRequest, request: Request, token: Optional[str] = None):
+    require_any_session(token_from_request(request, token))
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
     try:
@@ -2125,7 +2225,8 @@ class OffboardingExtractRequest(BaseModel):
 
 
 @router.post("/offboarding/extract")
-def offboarding_extract(req: OffboardingExtractRequest):
+def offboarding_extract(req: OffboardingExtractRequest, request: Request, token: Optional[str] = None):
+    require_any_session(token_from_request(request, token))
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
     try:
@@ -2228,7 +2329,8 @@ class VantageScanRequest(BaseModel):
 
 
 @router.post("/vantage/scan")
-def vantage_scan(req: VantageScanRequest):
+def vantage_scan(req: VantageScanRequest, request: Request, token: Optional[str] = None):
+    require_any_session(token_from_request(request, token))
     if not req.candidates:
         return {"gaps": []}
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -2254,7 +2356,8 @@ class SuggestDelegatesRequest(BaseModel):
 
 
 @router.post("/offboarding/suggest-delegates")
-def offboarding_suggest_delegates(req: SuggestDelegatesRequest):
+def offboarding_suggest_delegates(req: SuggestDelegatesRequest, request: Request, token: Optional[str] = None):
+    require_any_session(token_from_request(request, token))
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
     try:
