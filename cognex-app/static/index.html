@@ -583,7 +583,12 @@
   .msg-cognex .body em { color: var(--accent-ink); font-style: normal; }
   .msg-cognex .body p { margin: 0 0 10px; }
   .msg-cognex .body p:last-child { margin-bottom: 0; }
-  .msg-cognex .body code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; background: var(--surface-3); padding: 1px 5px; border-radius: 5px; }
+  /* Scoped to .inline-code (not a bare "code" element selector) on purpose
+     -- see inlineFormat()'s own comment: a bare "code" selector here used to
+     collide with, and win over, .code-block code's much lower-specificity
+     rule for a real fenced block's <code>, painting every line of a block
+     with this chip's light background instead. */
+  .msg-cognex .body code.inline-code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; background: var(--surface-3); padding: 1px 5px; border-radius: 5px; }
   .msg-cognex .body .md-list { margin: 0 0 10px; padding-left: 20px; }
   .msg-cognex .body .md-list:last-child { margin-bottom: 0; }
   .msg-cognex .body .md-list li { margin-bottom: 3px; }
@@ -839,9 +844,34 @@
   .board-sector-hit { cursor: pointer; }
   .board-sector-arc { transform-box: fill-box; transform-origin: 50% 50%; transition: stroke-width .22s cubic-bezier(.2,.8,.2,1), opacity .22s ease, transform .22s cubic-bezier(.2,.8,.2,1); }
   .board-sector:hover .board-sector-arc, .board-sector.is-hot .board-sector-arc { stroke-width: 4.6; opacity: 1; transform: scale(1.045); }
+  /* Strands redesigned 2026-09-04 (direct founder feedback: "the strands
+     to be much more cool interactively connected", asked to draw from
+     animejs.com's own style) as a gently curved path per connector (a
+     quadratic-bezier bow, not a rigid straight spoke -- reads as an
+     organic "strand," matching the Company Brain concept, not a wiring
+     diagram) plus a matching draw-in animation on load: each path
+     measures its own length (drawBoardLines, JS) and animates
+     stroke-dashoffset from full-length to 0 with an easeOutExpo-ish
+     curve, staggered per node so the tree visibly grows outward from the
+     ring rather than snapping in all at once. Two stacked <path>s per
+     connector (a .board-line-wrap wrapper carrying the existing
+     data-line-for/data-line-domain -- unchanged, so the hover JS below
+     still finds and toggles .hot exactly as before): .board-line-main is
+     the real always-visible strand; .board-line-flow is a second,
+     invisible-until-hot dashed copy of the same path that animates a
+     short traveling pulse along it -- the "flowing current toward the
+     node" read a hovered strand deserves, without touching the solid
+     line underneath. */
   .board-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-  .board-lines line { stroke-width: 0.4; opacity: 0.55; transition: stroke-width .15s ease, opacity .15s ease; }
-  .board-lines line.hot { stroke: var(--accent-ink) !important; stroke-width: 0.75; opacity: 1; }
+  .board-line-main { fill: none; stroke-linecap: round; stroke-width: 0.4; opacity: 0.5; transition: stroke-width .18s ease, opacity .18s ease, filter .25s ease, stroke-dashoffset .9s cubic-bezier(.16,1,.3,1); }
+  .board-line-wrap.hot .board-line-main { stroke: var(--accent-ink) !important; stroke-width: 0.85; opacity: 1; filter: drop-shadow(0 0 1.4px var(--accent-ink)); }
+  .board-line-flow { fill: none; stroke: var(--accent-ink); stroke-linecap: round; stroke-width: 1; stroke-dasharray: 2.6 8; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+  .board-line-wrap.hot .board-line-flow { opacity: 0.85; animation: strandFlow 1s linear infinite; }
+  @keyframes strandFlow { to { stroke-dashoffset: -21.2; } }
+  @media (prefers-reduced-motion: reduce) {
+    .board-line-main { transition: stroke-width .18s ease, opacity .18s ease, filter .25s ease; }
+    .board-line-flow, .board-line-wrap.hot .board-line-flow { display: none; }
+  }
   .brain-core { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 92px; height: 92px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, var(--accent-soft), var(--surface-2)); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 0 0 7px var(--surface), 0 6px 20px rgba(0,0,0,0.08); color: var(--accent-ink); z-index: 2; animation: brainPulse 3.6s ease-in-out infinite; }
   .brain-core-icon { display: flex; }
   .brain-core .board-count { font-size: 10.5px; font-weight: 700; color: var(--ink-soft); margin-top: 5px; letter-spacing: .01em; }
@@ -886,10 +916,10 @@
      nodes individually clickable. */
   .board-node.depth-1 { width: 92px; }
   .board-node.depth-1 .board-node-bubble { width: 50px; height: 50px; font-size: 17px; }
-  .board-node.depth-1 .board-node-title { font-size: 10.5px; }
+  .board-node.depth-1 .board-node-title { font-size: 9px; }
   .board-node.depth-2 { width: 76px; }
   .board-node.depth-2 .board-node-bubble { width: 42px; height: 42px; font-size: 14px; }
-  .board-node.depth-2 .board-node-title { font-size: 10px; }
+  .board-node.depth-2 .board-node-title { font-size: 8.5px; }
   /* A domain sector holding more trunks than fit comfortably on one ring
      gets split into several rings by layoutBoardTree's placeTrunks() --
      every trunk in a split sector is flagged "crowded," not just the
@@ -901,7 +931,7 @@
      didn't clear. */
   .board-node.crowded { width: 60px; }
   .board-node.crowded .board-node-bubble { width: 34px; height: 34px; font-size: 13px; }
-  .board-node.crowded .board-node-title { font-size: 9px; }
+  .board-node.crowded .board-node-title { font-size: 7.5px; }
   /* Hard-clamped to 2 lines. Direct founder feedback ("the topics are
      going out of the page") traced partly to titles that could wrap to 3+
      lines with nothing capping how tall that made a node's rendered box --
@@ -910,7 +940,13 @@
      overlapped whatever sat below it. The per-depth truncation budget in
      renderDecisions (titleBudget) keeps most titles from ever needing this
      clamp to kick in and cut a word off mid-sentence. */
-  .board-node-title { font-size: 11.5px; font-weight: 600; color: var(--ink); line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  /* Sized down a step across every depth (2026-09-04, direct founder
+     feedback: "would like the text to be smaller") -- smaller labels take
+     less angular room to stay legible at a given radius, which pairs with
+     the placeChildren/resolveResidualOverlaps overlap fix above: less
+     text-width pressure means fewer nodes need the collision-avoidance
+     nudge to kick in at all. */
+  .board-node-title { font-size: 10px; font-weight: 600; color: var(--ink); line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   /* z-index matters here, not just cosmetically: this button sits earlier
      in the DOM than .board-node-bubble, so without it the bubble (auto
      stacking, painted later) sits on top and silently eats its clicks --
@@ -3464,7 +3500,21 @@
      so nothing in a model's response can inject markup. */
   function inlineFormat(s) {
     var out = esc(s);
-    out = out.replace(/`([^`]+)`/g, function (_, code) { return "<code>" + code + "</code>"; });
+    // "inline-code" is a real class, not decoration: it's what keeps this
+    // short single-backtick chip's own styling (a light pill background,
+    // see .msg-cognex .body code.inline-code below) from also matching --
+    // and, on plain "code" specificity, WINNING over -- the much lower-
+    // specificity ".code-block code" rule that colors a real fenced code
+    // block's text. Before this, a fenced block's <code> had no class of
+    // its own, so both selectors matched the same element and the inline
+    // chip's higher-specificity rule (two classes + an element vs. one
+    // class + an element) silently won regardless of source order --
+    // stamping every line of a multi-line block with the chip's light
+    // background + padding + border-radius, which is exactly the pale,
+    // illegible, pill-per-line look a founder screenshot flagged
+    // (2026-09-04): near-white block text sitting on a light-gray chip
+    // background meant for a light chat bubble, not a dark code box.
+    out = out.replace(/`([^`]+)`/g, function (_, code) { return '<code class="inline-code">' + code + "</code>"; });
     out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     out = out.replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,!?]|$)/g, "$1<em>$2</em>");
     return out;
@@ -4262,15 +4312,33 @@
     // fans out wider -- "expand smartly"). In practice a parent here has
     // at most a small handful of children (new_branch adds one at a
     // time; split produces exactly two), so one radius for the whole
-    // group is enough -- the crowding problem below is specific to
-    // depth-0 trunks sharing a fixed 60-degree department sector.
+    // group is enough.
+    //
+    // 2026-09-04, direct founder screenshot: two sibling children rendered
+    // with their title text fully overlapping, illegible. Root cause --
+    // this function's OWN angular slice, not just a crowded domain sector:
+    // a parent trunk that itself landed in a narrow slice (one of several
+    // trunks sharing a crowded department, see placeTrunks/MAX_PER_RING)
+    // hands that same narrow span down to placeChildren, which used to
+    // divide it purely proportionally with no floor -- so 2+ children of
+    // a narrowly-placed parent could end up only a fraction of a degree
+    // apart, well under their own rendered width at that radius. Fixed by
+    // reserving a fixed minimum slice per child FIRST, then spreading
+    // whatever span is left over proportionally by weight on top of that
+    // floor -- a topic that's been split still visibly fans out wider
+    // than a plain leaf, just never below a legible minimum gap. Capped
+    // at span/nodes.length so it can never itself overflow the available
+    // span. resolveResidualOverlaps (below) is still the final safety
+    // net for whatever this floor doesn't fully clear.
     function placeChildren(nodes, angleStart, angleEnd, baseR, depth) {
       var span = angleEnd - angleStart;
       var weights = nodes.map(function (n) { return 1 + descendantCount(n.id); });
       var total = weights.reduce(function (a, b) { return a + b; }, 0);
+      var minSpanFloor = Math.min(span / nodes.length, 0.16);
+      var remaining = Math.max(span - minSpanFloor * nodes.length, 0);
       var cursor = angleStart;
       nodes.forEach(function (node, i) {
-        var nodeSpan = span * (weights[i] / total);
+        var nodeSpan = minSpanFloor + remaining * (weights[i] / total);
         var angle = (cursor + nodeSpan / 2) - Math.PI / 2;
         positions[node.id] = {
           cx: 50 + baseR * Math.cos(angle), cy: 50 + baseR * Math.sin(angle),
@@ -4394,6 +4462,29 @@
             var neededY = (nodeBoxHeight(a) + nodeBoxHeight(b)) / 2 / 7.2;
             if (dx < neededX && dy < neededY) {
               var ra = Math.hypot(a.cx - 50, a.cy - 50), rb = Math.hypot(b.cx - 50, b.cy - 50);
+              // 2026-09-04 fix: two siblings placed at (or very close to)
+              // the SAME radius -- the exact shape of a founder-reported
+              // overlap where two children of one parent landed with
+              // nearly identical angles too -- can't be separated by
+              // pushing one of them further out along ITS OWN angle; at
+              // near-equal radii that push barely changes their angular
+              // (tangential) gap, which is what was actually colliding.
+              // Nudge both apart in angle instead, at their current
+              // radius, in addition to (not instead of) the radial push
+              // below -- tangential separation scales with radius, so
+              // even a small angular nudge clears real space at the
+              // radii this board actually uses (30-45).
+              if (Math.abs(ra - rb) < 3) {
+                var angA = Math.atan2(a.cy - 50, a.cx - 50), angB = Math.atan2(b.cy - 50, b.cx - 50);
+                var diff = angB - angA;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                var nudge = 0.035; // ~2 degrees per side, ~4 total -- small steps, the pass loop repeats until clear
+                if (diff >= 0) { angA -= nudge; angB += nudge; } else { angA += nudge; angB -= nudge; }
+                a.cx = 50 + ra * Math.cos(angA); a.cy = 50 + ra * Math.sin(angA);
+                b.cx = 50 + rb * Math.cos(angB); b.cy = 50 + rb * Math.sin(angB);
+                moved = true;
+              }
               var target = ra >= rb ? a : b;
               var curR = Math.max(ra, rb);
               if (curR < MAX_R) {
@@ -4590,6 +4681,42 @@
     // a pushed-out trunk draws a real visible spoke back to where it
     // belongs.
     var BOARD_RING_R = 27; // matches layoutBoardTree's own R0 / boardRingSvg's R
+    // A tiny deterministic string hash -- NOT crypto, just needs to pick
+    // the same "which way does this one strand's curve bow" on every
+    // render for a given decision id, so re-rendering the board (e.g.
+    // after a save) doesn't make already-settled strands visibly jump to
+    // a different curve shape. Math.random() would do that.
+    function hashUnit(s) {
+      var h = 0;
+      for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+      return ((h % 1000) + 1000) % 1000 / 1000; // 0..1
+    }
+    // A quadratic-bezier "strand" between two points, bowed sideways by a
+    // small amount so it reads as an organic curve rather than a rigid
+    // wiring-diagram spoke -- see the .board-lines CSS comment for why
+    // (2026-09-04, direct founder feedback wanting the strands to feel
+    // more "cool interactively connected," pointed at animejs.com's own
+    // style). The bow direction/magnitude is deterministic per id (via
+    // hashUnit above), not random per render, and scales down for short
+    // segments so a nearly-zero-length trunk-to-ring connector doesn't
+    // bow into a visible loop.
+    function strandPathD(x1, y1, x2, y2, id) {
+      var mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      var dx = x2 - x1, dy = y2 - y1;
+      var len = Math.hypot(dx, dy) || 1;
+      var nx = -dy / len, ny = dx / len; // unit normal, for a sideways bow
+      var sign = hashUnit(id) < 0.5 ? -1 : 1;
+      var bow = Math.min(len * 0.22, 3.2) * sign;
+      var cx = mx + nx * bow, cy = my + ny * bow;
+      return "M" + x1.toFixed(2) + "," + y1.toFixed(2) + " Q" + cx.toFixed(2) + "," + cy.toFixed(2) + " " + x2.toFixed(2) + "," + y2.toFixed(2);
+    }
+    function strandHtml(id, domAttr, color, x1, y1, x2, y2) {
+      var d = strandPathD(x1, y1, x2, y2, id);
+      return '<g class="board-line-wrap" data-line-for="' + esc(id) + '" data-line-domain="' + domAttr + '">' +
+        '<path class="board-line-main" d="' + d + '" style="stroke:' + color + '"></path>' +
+        '<path class="board-line-flow" d="' + d + '" style="stroke:' + color + '"></path>' +
+        "</g>";
+    }
     var linesHtml = decisions.map(function (d) {
       var pos = positions[d.id];
       if (!pos) return "";
@@ -4598,11 +4725,11 @@
       if (!d.parentId) {
         var angle = Math.atan2(pos.cy - 50, pos.cx - 50);
         var rx = 50 + BOARD_RING_R * Math.cos(angle), ry = 50 + BOARD_RING_R * Math.sin(angle);
-        return '<line data-line-for="' + esc(d.id) + '" data-line-domain="' + domAttr + '" x1="' + rx + '" y1="' + ry + '" x2="' + pos.cx + '" y2="' + pos.cy + '" style="stroke:' + color + '"></line>';
+        return strandHtml(d.id, domAttr, color, rx, ry, pos.cx, pos.cy);
       }
       var parentPos = positions[d.parentId];
       if (!parentPos) return "";
-      return '<line data-line-for="' + esc(d.id) + '" data-line-domain="' + domAttr + '" x1="' + parentPos.cx + '" y1="' + parentPos.cy + '" x2="' + pos.cx + '" y2="' + pos.cy + '" style="stroke:' + color + '"></line>';
+      return strandHtml(d.id, domAttr, color, parentPos.cx, parentPos.cy, pos.cx, pos.cy);
     }).join("");
     // Title length is trimmed harder than before, by depth: the title's
     // own CSS now hard-clamps to 2 lines (see .board-node-title), and a
@@ -4639,11 +4766,51 @@
       '<svg class="board-lines" viewBox="0 0 100 100" preserveAspectRatio="none">' + linesHtml + "</svg>" +
       '<div class="brain-core"><span class="brain-core-icon">' + BRAIN_ICON_SVG + '</span><span class="board-count">' + countLabel + '</span></div>' + nodesHtml;
 
+    // Draw the strands in rather than snapping them in fully-formed: each
+    // path measures its own real on-screen length via getTotalLength()
+    // (has to happen after the innerHTML assignment above, once the SVG
+    // is actually in the document and laid out), then animates
+    // stroke-dashoffset from that length down to 0 -- the classic "line
+    // draws itself" technique, staggered a little per node by radial
+    // depth so trunks visibly settle first and branches/splits follow,
+    // reading as the tree growing outward from the ring rather than every
+    // strand arriving at once. Skipped under reduced-motion (matches this
+    // app's existing convention elsewhere, e.g. the landing page's
+    // scroll-scrubbed cards) -- every strand just renders fully drawn.
+    if (!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+      board.querySelectorAll(".board-line-main").forEach(function (path, i) {
+        var len = 0;
+        try { len = path.getTotalLength(); } catch (e) { return; }
+        path.style.transition = "none";
+        path.style.strokeDasharray = len;
+        path.style.strokeDashoffset = len;
+        // Force layout so the browser registers the "fully hidden" start
+        // state before the transition below is re-enabled -- otherwise
+        // it can coalesce both style writes into one paint and the line
+        // just appears instantly instead of animating.
+        void path.getBoundingClientRect();
+        var delay = Math.min(i * 22, 420);
+        setTimeout(function () {
+          path.style.transition = "";
+          path.style.strokeDashoffset = "0";
+        }, delay);
+      });
+    }
+
     // Watch Dogs: Legion-style focus: hovering a department's ring sector,
     // its legend row, or any one of its nodes highlights the whole group
     // together (matching nodes pop, the arc pops, everyone else on the
     // board recedes slightly) -- a single shared entry point since three
     // different kinds of element can trigger the exact same highlight.
+    // 2026-09-04: extended to the strands themselves (data-line-domain,
+    // set on each .board-line-wrap) -- previously only a single hovered
+    // NODE'S own strand lit up (see the mouseenter handler below); a
+    // domain-level hover (the ring sector or its legend row) left every
+    // strand at its resting opacity even though the nodes themselves all
+    // popped. Now the whole department's strand network lights up
+    // together with its nodes -- reads as one connected structure, which
+    // is the whole point of a "strand," not a set of independently
+    // floating spokes.
     function setHotDomain(domainKey) {
       board.classList.toggle("has-hot-domain", !!domainKey);
       board.querySelectorAll("[data-node-domain]").forEach(function (el) {
@@ -4651,6 +4818,9 @@
       });
       board.querySelectorAll("[data-sector-domain]").forEach(function (el) {
         el.classList.toggle("is-hot", domainKey && el.getAttribute("data-sector-domain") === domainKey);
+      });
+      board.querySelectorAll("[data-line-domain]").forEach(function (el) {
+        el.classList.toggle("hot", domainKey && el.getAttribute("data-line-domain") === domainKey);
       });
       if (legendEl) {
         legendEl.querySelectorAll("[data-legend-domain]").forEach(function (el) {
