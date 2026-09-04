@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import base64
+import urllib.parse
 import uuid
 
 from anthropic import Anthropic
@@ -1138,6 +1139,38 @@ def health():
     return {"ok": True, "api_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY"))}
 
 
+def _safe_content_disposition(disposition: str, filename: Optional[str], fallback: str) -> str:
+    """Builds a Content-Disposition header value that a malicious filename
+    can't corrupt. Added 2026-09-04 (pre-launch security pass, audit Low
+    #34) — the three routes below were building this header by directly
+    f-string-interpolating a filename that originates from user-controlled
+    data (a company's own uploaded document name, or an AI-generated
+    image's caption-derived name) straight into a double-quoted header
+    value, with no sanitization at all. A filename containing a `"` breaks
+    out of the quoted string and can inject additional header-parameter-
+    looking content after it; embedded control characters (a literal CR/LF
+    in particular) risk response-splitting-style header injection depending
+    on how lenient the underlying HTTP stack is about what it lets through.
+    Neither should be trusted not to happen just because filenames don't
+    usually look like that — "don't usually" is exactly the gap an attacker
+    uses.
+
+    Strips every non-printable character (control chars, CR/LF included --
+    never legitimate in a filename), falls back to `fallback` (the file's
+    own id) if that leaves nothing usable, and emits BOTH a plain ASCII
+    `filename=` for old clients and an RFC 5987 percent-encoded `filename*=`
+    for real (possibly non-ASCII) names — the same two-parameter pattern
+    browsers already expect from any server that wants non-ASCII filenames
+    to round-trip correctly, not a workaround specific to this fix.
+    """
+    name = "".join(ch for ch in (filename or "") if ch.isprintable()).strip()
+    if not name:
+        name = fallback or "download"
+    ascii_name = name.encode("ascii", "replace").decode("ascii").replace("\\", "_").replace('"', "_")
+    encoded_name = urllib.parse.quote(name, safe="")
+    return f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"
+
+
 @router.get("/files/{file_id}")
 def get_generated_file(file_id: str, request: Request, token: Optional[str] = None):
     """Streams back a file code_execution generated (a chart image, a CSV,
@@ -1174,7 +1207,7 @@ def get_generated_file(file_id: str, request: Request, token: Optional[str] = No
         return Response(
             content=rec["bytes"],
             media_type=rec["mime_type"] or "application/octet-stream",
-            headers={"Content-Disposition": f'inline; filename="{rec["filename"] or file_id}"'},
+            headers={"Content-Disposition": _safe_content_disposition("inline", rec["filename"], file_id)},
         )
     if file_id.startswith("doc-"):
         # A company document library upload (added 2026-08-31, see
@@ -1192,7 +1225,7 @@ def get_generated_file(file_id: str, request: Request, token: Optional[str] = No
         return Response(
             content=d.content_bytes,
             media_type=d.mime_type or "application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{d.filename or file_id}"'},
+            headers={"Content-Disposition": _safe_content_disposition("attachment", d.filename, file_id)},
         )
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set on the server.")
@@ -1206,7 +1239,7 @@ def get_generated_file(file_id: str, request: Request, token: Optional[str] = No
     return Response(
         content=content,
         media_type=meta.mime_type or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{meta.filename or file_id}"'},
+        headers={"Content-Disposition": _safe_content_disposition("inline", meta.filename, file_id)},
     )
 
 

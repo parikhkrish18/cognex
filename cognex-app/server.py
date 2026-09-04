@@ -31,7 +31,7 @@ is only so you can `curl` different personas without standing up real auth.
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -46,14 +46,125 @@ import persistence
 from db import init_db
 from db_postgres import init_db as init_postgres_db
 
-app = FastAPI(title="Cognex")
+# ============ Pre-launch security pass (2026-09-04) ============
+# Data in this app is confidential per company (financials, layoffs,
+# acquisition talks — the whole pitch is "chain of command protection"), so
+# the bar here is "would I be comfortable pointing a real customer's
+# confidential data at this," not just "does it work." Three things below:
+# a real CORS allowlist instead of a wildcard, response security headers on
+# every request, and the interactive API docs turned off by default. See
+# also live.py (the file-download Content-Disposition sanitization) and the
+# Procfile (uvicorn now trusts Railway's own proxy headers).
+
+# CORS: this is a single deployable service — the browser loads the page
+# AND calls the API from the exact same origin, so a same-origin request
+# never needs a CORS header to succeed at all. The allowlist below only
+# matters for the handful of legitimate cross-origin cases (local dev
+# against a separately-served frontend, a future integration calling the
+# API directly) and, more importantly, for what it now REFUSES: the
+# wildcard this replaces would let literally any website on the internet
+# read responses from a signed-in user's browser via a background fetch,
+# which is real data exfiltration surface on an app whose entire premise is
+# per-company confidentiality — this is the fix for audit Low #33 (the
+# "tighten this before deploying anywhere real" comment sitting right above
+# the wildcard, since 2026-08-31, until now). Configurable via ALLOWED_ORIGINS
+# (comma-separated) so the founder isn't stuck editing code to add a real
+# custom domain; defaults to the known production domain plus local dev.
+_DEFAULT_ALLOWED_ORIGINS = [
+    "https://cognex.arviahstudio.com",
+    "http://localhost:8787",
+    "http://127.0.0.1:8787",
+]
+_allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "").strip()
+ALLOWED_ORIGINS = (
+    [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+    if _allowed_origins_env
+    else _DEFAULT_ALLOWED_ORIGINS
+)
+
+# Interactive API docs (/docs, /redoc) and the raw OpenAPI schema
+# (/openapi.json) are FastAPI defaults meant for building against an API,
+# not for a production app protecting confidential per-company data — left
+# on, they hand anyone the complete route/parameter inventory of a
+# multi-tenant system with real customer data behind it, for free, with no
+# auth check of their own. Off unless explicitly opted into (local dev,
+# or a deliberate choice to publish the API for integration partners).
+_enable_api_docs = os.environ.get("ENABLE_API_DOCS", "").strip().lower() in ("1", "true", "yes")
+
+app = FastAPI(
+    title="Cognex",
+    docs_url="/docs" if _enable_api_docs else None,
+    redoc_url="/redoc" if _enable_api_docs else None,
+    openapi_url="/openapi.json" if _enable_api_docs else None,
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten this before deploying anywhere real
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+# Content-Security-Policy for the frontend this app itself serves. The whole
+# frontend is one self-contained HTML file with no external script/style/
+# font/image host anywhere in it (confirmed by grep before writing this —
+# zero <script src>, <link rel=stylesheet>, or https:// asset references) —
+# which is exactly what makes a real CSP practical here without breaking
+# anything: default-src 'self' plus connect-src 'self' means even a
+# successful injection can't load a remote script or exfiltrate data to an
+# attacker's own server, which is the actual high-value part of this policy.
+# 'unsafe-inline' on script-src/style-src is a real, known gap — this file's
+# markup and logic live in large inline <script>/<style> blocks (a nonce-
+# based CSP would mean restructuring how the frontend ships, out of scope
+# for this pass) — so this does not stop a DOM-based XSS payload from
+# EXECUTING; it stops one from phoning home or loading a second-stage
+# payload from anywhere but this app's own origin. Defense in depth on top
+# of (not instead of) the actual XSS fixes already shipped (esc() escaping
+# quotes, the offline-answer-engine removal).
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "object-src 'none'"
+)
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    """Response security headers, on every request. Each one closes a
+    specific, well-known class of attack rather than being boilerplate:
+    X-Frame-Options + frame-ancestors (CSP, above) both stop this app from
+    being loaded inside another site's <iframe> for clickjacking; X-Content-
+    Type-Options stops a browser from "helpfully" re-sniffing an uploaded
+    document's content-type into something executable; Referrer-Policy keeps
+    this app's own URLs (which can carry no secrets today, but shouldn't
+    ever be relied on to stay that way) out of the Referer header sent to
+    any third-party link; Permissions-Policy denies browser device/payment
+    APIs this app has no legitimate use for, so an injected script can't
+    invoke them even if it got that far; Strict-Transport-Security tells the
+    browser to never downgrade to plain HTTP for this domain again, once
+    it's been loaded over HTTPS once (Railway serves the production domain
+    over HTTPS already — this doesn't add a redirect, which would risk a
+    loop if the app ever misjudges its own scheme behind a proxy; it only
+    strengthens what the browser does on its own next visit).
+    """
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(), camera=(), payment=(), usb=(), "
+        "magnetometer=(), gyroscope=(), interest-cohort=()"
+    )
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = _CSP
+    return response
 
 
 @app.on_event("startup")
@@ -101,8 +212,15 @@ STATIC_DIR = Path(__file__).parent / "static"
 @app.get("/")
 def index():
     """Serves the Cognex frontend. One deployable service: this FastAPI app
-    is both the API and the site — no separate static host needed."""
-    return FileResponse(STATIC_DIR / "index.html")
+    is both the API and the site — no separate static host needed.
+
+    no-store: this is a single HTML file that changes on every deploy, with
+    no filename versioning/hashing. Without an explicit no-cache directive,
+    browsers can (and did, in practice — see the 2026-08-29 build log entry)
+    keep serving a stale cached copy after a push, which looks exactly like
+    "I pushed the fix but nothing changed" from the outside.
+    """
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
 
 def _get_persona(persona_id: str):

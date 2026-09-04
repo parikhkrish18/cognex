@@ -1,4 +1,16 @@
 <title>Cognex</title>
+<!-- Favicon — an inline SVG data URI rather than a separate file, matching
+     this app's zero-external-dependency, single-file architecture (no image
+     host, no build step to fingerprint an asset). Echoes the same connected-
+     nodes glyph already used for the Company Brain board's center icon
+     (BRAIN_ICON_SVG, further down this file) so the browser tab and the
+     product's own "company memory" iconography read as the same mark,
+     simplified to 3 nodes instead of 5 since a favicon renders as small as
+     16x16 and the full glyph's finer strokes disappear at that size. "icon"
+     covers current browsers; "shortcut icon" is kept alongside it purely for
+     older browsers/crawlers that only recognize that older rel value. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230071e3'/%3E%3Ccircle cx='16' cy='9' r='2.6' fill='%23fff'/%3E%3Ccircle cx='9' cy='21' r='2.6' fill='%23fff'/%3E%3Ccircle cx='23' cy='21' r='2.6' fill='%23fff'/%3E%3Cline x1='16' y1='11.3' x2='10.3' y2='19.1' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3Cline x1='16' y1='11.3' x2='21.7' y2='19.1' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3Cline x1='11.3' y1='21' x2='20.7' y2='21' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link rel="shortcut icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230071e3'/%3E%3Ccircle cx='16' cy='9' r='2.6' fill='%23fff'/%3E%3Ccircle cx='9' cy='21' r='2.6' fill='%23fff'/%3E%3Ccircle cx='23' cy='21' r='2.6' fill='%23fff'/%3E%3Cline x1='16' y1='11.3' x2='10.3' y2='19.1' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3Cline x1='16' y1='11.3' x2='21.7' y2='19.1' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3Cline x1='11.3' y1='21' x2='20.7' y2='21' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
 <style>
@@ -2851,13 +2863,20 @@
     document.getElementById("platform-shell").style.display = "none";
     document.getElementById("app-shell").style.display = "none";
 
-    if (ui.wizard) { renderOnboarding(); document.getElementById("onboarding-shell").style.display = "flex"; return; }
-    if (session.type === "platform") { renderPlatform(); document.getElementById("platform-shell").style.display = "block"; return; }
+    // Every top-level shell switch also sets a real document.title, so the
+    // browser tab (and history/bookmarks) says something more specific than
+    // "Cognex" no matter which of the five screens is actually showing.
+    // The one exception is the signed-in app itself, whose title is set by
+    // renderTabs() instead -- it needs to track the active workspace tab AND
+    // the current company, neither of which is known at this switch point.
+    if (ui.wizard) { document.title = "Get started — Cognex"; renderOnboarding(); document.getElementById("onboarding-shell").style.display = "flex"; return; }
+    if (session.type === "platform") { document.title = "Staff console — Cognex"; renderPlatform(); document.getElementById("platform-shell").style.display = "block"; return; }
     if (session.type === "company") {
       var c = currentCompany(), p = currentPersona();
       if (c && p) { document.getElementById("app-shell").style.display = "flex"; renderApp(); return; }
     }
-    if (!ui.showLogin) { document.getElementById("landing-shell").style.display = "block"; return; }
+    if (!ui.showLogin) { document.title = "Cognex — Company memory, permission-filtered"; document.getElementById("landing-shell").style.display = "block"; return; }
+    document.title = "Sign in — Cognex";
     renderLogin();
     document.getElementById("login-shell").style.display = "flex";
   }
@@ -3409,8 +3428,15 @@
       document.getElementById("tab-" + id).style.display = state.tab === id ? (id === "ask" ? "flex" : "block") : "none";
     });
     document.getElementById("main-scroll").style.display = state.tab === "ask" ? "none" : "block";
+    var tabLabel = TAB_LABELS[state.tab] || "Cognex";
     var mobileTitle = document.getElementById("mobile-topbar-title");
-    if (mobileTitle) mobileTitle.textContent = TAB_LABELS[state.tab] || "Cognex";
+    if (mobileTitle) mobileTitle.textContent = tabLabel;
+    // Real browser-tab title too, not just the mobile in-app one above --
+    // includes the company name so a staff member with several "Enter as
+    // support" tabs open (or anyone with more than one browser tab on this
+    // app) can actually tell them apart from the tab strip alone, and so
+    // does which workspace section is showing, not just "Cognex" nine times.
+    document.title = company ? (tabLabel + " — " + company.name) : tabLabel;
   }
 
   function renderAsk() {
