@@ -964,8 +964,41 @@
   .board-detail-close { flex: none; border: none; background: none; color: var(--ink-faint); cursor: pointer; font-size: 18px; padding: 2px 4px; line-height: 1; }
   .board-detail-close:hover { color: var(--ink); }
   .board-detail-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-faint); margin-bottom: 16px; }
-  .board-detail-body { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; margin-bottom: 8px; }
-  @media (max-width: 560px) { .board-detail-body { grid-template-columns: 1fr; } }
+  /* Redesigned 2026-09-04, direct founder feedback: the old two-column
+     grid (Why / Alternatives / Assumptions / Risks / Review / Result, side
+     by side) put a raw, ever-growing "Why" log front and center and left
+     Risks/Review/Result rendering as permanently-empty boilerplate ("Not
+     yet scheduled" / "Captured … via Ask Cognex") on nearly every node,
+     since nothing in the save flow ever populates them with anything
+     real. Reframed into three stacked, full-width blocks instead: a short
+     summary up top, one structured "what we know" block below it (a real
+     table built from the why[] history, not a raw dump), and Attachments
+     last — see decisionDetailHtml() for how each is built. Full-width
+     because a table reads badly squeezed into a 50%-width column. */
+  /* .modal-card.board-detail-card (not just .board-detail-card alone) so
+     this reliably beats .modal-card's own max-width: 580px regardless of
+     source order -- same class of specificity bug as the 2026-09-04
+     code-block CSS fix earlier this session; fixed the same way, by
+     giving this rule real specificity instead of relying on where it
+     happens to sit in the stylesheet. */
+  .modal-card.board-detail-card { max-width: 760px; }
+  .board-detail-body { display: flex; flex-direction: column; gap: 22px; margin-bottom: 8px; }
+  .ddet-block h4 { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; color: var(--ink-faint); margin-bottom: 9px; }
+  .ddet-summary p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--ink); }
+  .ddet-why-table-wrap { overflow-x: auto; border: 1px solid var(--border-soft); border-radius: 12px; }
+  .ddet-why-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ddet-why-table th { text-align: left; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--ink-faint); padding: 9px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+  .ddet-why-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-soft); color: var(--ink-soft); vertical-align: top; }
+  .ddet-why-table tr:last-child td { border-bottom: none; }
+  .ddet-why-table td.ddet-date { white-space: nowrap; color: var(--ink-faint); font-size: 12px; }
+  .ddet-why-table td.ddet-source { white-space: nowrap; font-size: 12px; }
+  .ddet-subsec { margin-top: 14px; }
+  .ddet-subsec h5 { font-size: 11px; font-weight: 600; color: var(--ink-faint); margin-bottom: 6px; }
+  .ddet-subsec ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-soft); }
+  .ddet-subsec ul li { margin-bottom: 4px; }
+  .ddet-empty { font-size: 13px; color: var(--ink-faint); font-style: italic; }
+  .ddet-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .ddet-files .output-file-card { margin-bottom: 0; }
   .board-detail-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
 
   /* ============ Leave-company modal / handoff ============ */
@@ -1869,6 +1902,7 @@
       contributor: d.contributor || null,
       viaStory: !!d.viaStory, viaSlack: !!d.viaSlack, viaChat: !!d.viaChat, viaVantage: !!d.viaVantage,
       domain: d.domain || "other", parentId: d.parentId || null,
+      attachments: d.attachments || [],
     }));
   }
   /* ============ Memory consolidation — the Company Brain's actual "collective
@@ -1920,8 +1954,16 @@
       existing.tags = (existing.tags || []).concat((resultTags || []).filter(function (t) { return (existing.tags || []).indexOf(t) === -1; }));
       existing.decided = draftDecision.decided;
       existing.why = (existing.why || []).concat([whyLineFor(draftDecision.decided, draftDecision.owner)]);
+      // Any file the merged-in turn brought along joins this node's own
+      // attachments (deduped by id -- a re-save of an already-saved turn
+      // shouldn't double the list).
+      var existingIds = (existing.attachments || []).map(function (a) { return a.id; });
+      existing.attachments = (existing.attachments || []).concat(
+        (draftDecision.attachments || []).filter(function (a) { return existingIds.indexOf(a.id) === -1; })
+      );
       persistFireAndForget(apiV2("PUT", "/companies/" + company.id + "/decisions/" + encodeURIComponent(existing.id), {
         title: existing.title, derived: existing.derived, tags: existing.tags, why: existing.why, decided: existing.decided,
+        attachments: existing.attachments,
       }));
     }
     function runSplit(target) {
@@ -1939,7 +1981,11 @@
         var children = (plan.split_children || []).map(function (c, i) {
           var why = (c.why_indices || []).map(function (idx) { return (target.why || [])[idx]; }).filter(function (x) { return x != null; });
           if (i === plan.new_content_child_index) why = why.concat([newWhyLine]);
-          return { id: target.id + "-" + (i + 1), title: c.title, summary: c.summary, tags: c.tags || [], why: why };
+          // Only the child that actually absorbed this save's new content
+          // gets its file(s) -- see SplitChildIn.attachments in
+          // persistence.py for why the rest can't be reliably split too.
+          var attachments = (i === plan.new_content_child_index) ? (draftDecision.attachments || []) : [];
+          return { id: target.id + "-" + (i + 1), title: c.title, summary: c.summary, tags: c.tags || [], why: why, attachments: attachments };
         });
         fetch("/api/v2/companies/" + company.id + "/decisions/" + encodeURIComponent(target.id) + "/split", {
           method: "POST", headers: authHeaders({ "content-type": "application/json" }),
@@ -1958,7 +2004,7 @@
               derivedLevel: target.derivedLevel, why: c.why, alternatives: [], assumptions: [], risks: [], review: target.review,
               result: target.result, tags: c.tags, derived: c.derived, contributor: target.contributor,
               viaStory: target.viaStory, viaSlack: target.viaSlack, viaChat: target.viaChat, viaVantage: target.viaVantage,
-              domain: target.domain, parentId: target.id,
+              domain: target.domain, parentId: target.id, attachments: c.attachments || [],
             });
           });
           var idx = (typeof plan.new_content_child_index === "number") ? plan.new_content_child_index : 0;
@@ -3795,6 +3841,13 @@
       tags: keyTermsFrom([turn.q, bodyText], 8).concat([(p.dept || "").toLowerCase()]),
       derived: turn.q + " — context captured directly from " + p.name + "'s conversation with Cognex.",
       viaChat: true,
+      // Any file this turn's answer actually generated (a chart, an AI
+      // image) rides along into Decision Memory too -- see the node detail
+      // panel's Attachments section. {id, filename, mimeType, sizeBytes},
+      // same shape the chat's own "View output" panel already uses.
+      attachments: (turn.a.files || []).map(function (f) {
+        return { id: f.id, filename: f.filename, mimeType: f.mimeType, sizeBytes: f.sizeBytes };
+      }),
     };
     return { newDecision: newDecision, bodyText: bodyText };
   }
@@ -4156,19 +4209,85 @@
     });
   }
 
-  function decisionSections(d) {
-    var sections = [];
-    if (d.contributor) sections.push({ label: "Reported by " + d.owner, body: '<p>“' + esc(d.contributor) + '”</p>' });
-    sections.push({ label: "Why", list: d.why });
-    if (d.alternatives && d.alternatives.length) sections.push({ label: "Alternatives considered", list: d.alternatives });
-    if (d.assumptions && d.assumptions.length) sections.push({ label: "Assumptions", list: d.assumptions });
-    sections.push({ label: "Risks", list: d.risks });
-    sections.push({ label: "Review", body: "<p>" + esc(d.review) + "</p>" });
-    sections.push({ label: "Result", body: "<p>" + esc(d.result) + "</p>" });
-    return sections.map(function (s) {
-      var body = s.body || ("<ul>" + s.list.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul>");
-      return '<div class="dcard-sec"><h4>' + esc(s.label) + "</h4>" + body + "</div>";
-    }).join("");
+  // A why[] line is either the raw bracketed provenance format
+  // whyLineFor() writes on every save AFTER the first ("[date · owner via
+  // source] text"), or -- the very first line on a chat-created node --
+  // plain body text with no bracket at all (buildDecisionDraftFromTurn
+  // just does `why: [bodyText]`). Parsed here into {date, owner, source,
+  // text} either way, so the detail table below always has real columns
+  // to show instead of one growing blob of text.
+  function parseWhyLine(line, d) {
+    var m = /^\[(.*?) · (.*?) via (.*?)\] ([\s\S]*)$/.exec(line || "");
+    if (m) return { date: m[1], owner: m[2], source: m[3], text: m[4] };
+    var source = d.viaStory ? "Complete the Story" : d.viaSlack ? "Slack" : d.viaChat ? "Ask Cognex" : d.viaVantage ? "The Vantage Room" : "—";
+    return { date: d.decided, owner: d.owner, source: source, text: line || "" };
+  }
+  // Redesigned 2026-09-04, direct founder feedback on the node detail
+  // panel: "What we know is good... Why is just an entire copy paste of
+  // the model's output at the time. Risks and review are always empty.
+  // Let's reframe this" -- a 2-3 line summary up top, a real structured
+  // detail block (not a raw log dump) below it, then attachments. This
+  // reads the exact same fields the old flat section list did (nothing
+  // AI-generated is new here, no prompt/schema touched) -- only how
+  // they're presented changed. Risks/Review/Result are folded in only
+  // when they actually carry something beyond the save flow's own
+  // boilerplate defaults ("Not yet scheduled" / "TBD" / "Captured … via
+  // …") -- those defaults were exactly what read as "always empty."
+  function decisionDetailHtml(d) {
+    var html = "";
+
+    if (d.derived) {
+      html += '<div class="ddet-block ddet-summary"><h4>Summary</h4><p>' + esc(d.derived) + "</p></div>";
+    }
+
+    var whyRows = (d.why || []).map(function (line) { return parseWhyLine(line, d); }).reverse(); // most recent first, matching how nodes themselves sort
+    var detail = '<div class="ddet-block ddet-details"><h4>What we know</h4>';
+    if (whyRows.length) {
+      detail += '<div class="ddet-why-table-wrap"><table class="ddet-why-table"><thead><tr><th>Date</th><th>Source</th><th>Detail</th></tr></thead><tbody>' +
+        whyRows.map(function (r) {
+          return "<tr><td class=\"ddet-date\">" + esc(r.date) + "</td><td class=\"ddet-source\">" + esc(r.owner ? r.owner + " · " + r.source : r.source) + "</td><td>" + esc(r.text) + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    } else {
+      detail += '<p class="ddet-empty">No history captured for this topic yet.</p>';
+    }
+    if (d.contributor) {
+      detail += '<div class="ddet-subsec"><h5>Reported by ' + esc(d.owner) + '</h5><p>“' + esc(d.contributor) + '”</p></div>';
+    }
+    if (d.alternatives && d.alternatives.length) {
+      detail += '<div class="ddet-subsec"><h5>Alternatives considered</h5><ul>' + d.alternatives.map(function (a) { return "<li>" + esc(a) + "</li>"; }).join("") + "</ul></div>";
+    }
+    if (d.assumptions && d.assumptions.length) {
+      detail += '<div class="ddet-subsec"><h5>Assumptions</h5><ul>' + d.assumptions.map(function (a) { return "<li>" + esc(a) + "</li>"; }).join("") + "</ul></div>";
+    }
+    if (d.risks && d.risks.length) {
+      detail += '<div class="ddet-subsec"><h5>Risks</h5><ul>' + d.risks.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div>";
+    }
+    if (d.review && d.review !== "Not yet scheduled") {
+      detail += '<div class="ddet-subsec"><h5>Review</h5><p>' + esc(d.review) + "</p></div>";
+    }
+    if (d.result && d.result !== "TBD" && !/^Captured .* via /.test(d.result)) {
+      detail += '<div class="ddet-subsec"><h5>Result</h5><p>' + esc(d.result) + "</p></div>";
+    }
+    detail += "</div>";
+    html += detail;
+
+    var files = d.attachments || [];
+    html += '<div class="ddet-block ddet-attachments"><h4>Attachments</h4>';
+    if (files.length) {
+      html += '<div class="ddet-files">' + files.map(function (f) {
+        var preview = fileIsImage(f) ? '<img src="/api/files/' + encodeURIComponent(f.id) + '" alt="' + esc(f.filename || "attachment") + '" />' : "";
+        return '<div class="output-file-card">' + preview +
+          '<div class="fname">' + esc(f.filename || "file") + "</div>" +
+          '<div class="fmeta">' + esc(f.mimeType || "") + (f.sizeBytes ? " · " + formatFileSize(f.sizeBytes) : "") + "</div>" +
+          '<a class="fdownload" href="/api/files/' + encodeURIComponent(f.id) + '" download="' + esc(f.filename || "file") + '">Download →</a>' +
+          "</div>";
+      }).join("") + "</div>";
+    } else {
+      html += '<p class="ddet-empty">No files attached to this topic yet.</p>';
+    }
+    html += "</div>";
+
+    return html;
   }
   /* ============ Company Brain board ============
      Redesigned 2026-08-31 into a department-hub tree, per direct founder
@@ -4196,7 +4315,7 @@
      physics/force-directed layout library) so it stays responsive and
      dependency-free, matching the rest of this app. Clicking a node still
      opens the exact same detail content the old flat board showed (reusing
-     decisionSections/sourceBadgeFor/decisionView unchanged — clearance
+     decisionDetailHtml/sourceBadgeFor/decisionView unchanged — clearance
      filtering is completely untouched by this redesign, only how the tree
      is browsed, laid out, and hovered). */
   /* Departments used to be a fixed six-slot list here. Direct founder
@@ -4896,21 +5015,16 @@
     }
     var body;
     if (mode === "source") {
-      // Added 2026-08-31 — direct founder feedback that a node "doesn't
-      // clearly show what it knows": this used to jump straight into the
-      // raw, ever-growing "Why" log (every save appends one more entry
-      // verbatim), so even someone with full access had to read the whole
-      // history to understand the topic. Lead with the consolidated
-      // summary (the same synthesized paragraph consolidate_memory writes
-      // to d.derived, and that a lower-clearance viewer already sees) —
-      // the raw log stays below it as full detail/provenance, not gone.
-      var summaryHtml = d.derived ? '<div class="dcard-sec"><h4>What we know</h4><div class="derived-notice">' + esc(d.derived) + "</div></div>" : "";
-      body = '<div class="board-detail-body">' + summaryHtml + decisionSections(d) + "</div>";
+      // Added 2026-08-31, reframed 2026-09-04 (see decisionDetailHtml's
+      // own comment) — Summary, then a real structured detail block, then
+      // Attachments, stacked full-width rather than the old two-column
+      // Why/Alternatives/Risks/Review/Result grid.
+      body = '<div class="board-detail-body">' + decisionDetailHtml(d) + "</div>";
     }
     else if (mode === "derived") body = '<div class="locked-notice">🔒 Raw decision record requires ' + LEVEL_LABEL[d.visibility] + ' clearance. You are seeing derived context only.</div><div class="derived-notice">' + esc(d.derived) + "</div>";
     else body = '<div class="locked-notice">🔒 This record and its derived context both require higher clearance than you currently have.</div>';
     var overlay = document.getElementById("board-detail-overlay");
-    overlay.innerHTML = '<div class="modal-card">' +
+    overlay.innerHTML = '<div class="modal-card board-detail-card">' +
       '<div class="board-detail-head"><h3>' + esc(d.title) + "</h3>" +
       '<button class="board-detail-close" id="board-detail-close" aria-label="Close">✕</button></div>' +
       '<div class="board-detail-meta">' + domainTag + storyTag + slackTag + chatTag + vantageTag + sourceBadgeFor(mode) + reviewTag +
