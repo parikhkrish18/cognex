@@ -96,6 +96,7 @@ def _decision_json(d: Decision) -> dict:
         "risks": d.risks or [], "review": d.review, "result": d.result,
         "tags": d.tags or [], "derived": d.derived,
         "domain": d.domain or "other", "parentId": d.parent_id,
+        "attachments": d.attachments or [],
     }
     if d.contributor:
         out["contributor"] = d.contributor
@@ -387,6 +388,9 @@ class DecisionIn(BaseModel):
     # existing one instead of the ring directly.
     domain: str = "other"
     parentId: Optional[str] = None
+    # Added 2026-09-04 for the node detail panel's Attachments section —
+    # see models.py's Decision.attachments docstring.
+    attachments: list = []
 
 
 @router.post("/companies/{company_id}/decisions")
@@ -403,6 +407,7 @@ def add_decision(company_id: str, req: DecisionIn, request: Request, token: Opti
             assumptions=req.assumptions, risks=req.risks, review=req.review, result=req.result, tags=req.tags,
             derived=req.derived, contributor=req.contributor, via_story=req.viaStory, via_slack=req.viaSlack,
             via_chat=req.viaChat, via_vantage=req.viaVantage, domain=req.domain or "other", parent_id=req.parentId,
+            attachments=req.attachments,
         )
         db.add(d)
         db.commit()
@@ -429,6 +434,11 @@ class DecisionUpdateIn(BaseModel):
     # earlier caller of this endpoint never touches domain, so this stays
     # untouched (None) for all of them.
     domain: Optional[str] = None
+    # Added 2026-09-04 — see DecisionIn.attachments above. The frontend
+    # sends the full resulting list (existing ones already unioned with any
+    # new ones), same pattern as `tags`, so this endpoint just replaces
+    # rather than merges.
+    attachments: Optional[list] = None
 
 
 @router.put("/companies/{company_id}/decisions/{decision_id}")
@@ -452,6 +462,8 @@ def update_decision(company_id: str, decision_id: str, req: DecisionUpdateIn, re
             d.decided = req.decided
         if req.domain is not None:
             d.domain = req.domain
+        if req.attachments is not None:
+            d.attachments = req.attachments
         db.commit()
         return _decision_json(d)
 
@@ -493,6 +505,14 @@ class SplitChildIn(BaseModel):
     summary: str = ""
     tags: list = []
     why: list = []
+    # Added 2026-09-04 — see DecisionIn.attachments above. Only the child
+    # that actually absorbed the new content carries any (the frontend
+    # sets this only for that one index); the trunk's own existing
+    # attachments, if it had any before the split, are deliberately left on
+    # the trunk rather than guessed at per child — why_indices tracks which
+    # TEXT went where, not which file went with which line, so there's no
+    # reliable way to split them further without losing track of one.
+    attachments: list = []
 
 
 class DecisionSplitIn(BaseModel):
@@ -541,6 +561,7 @@ def split_decision(company_id: str, decision_id: str, req: DecisionSplitIn, requ
                 assumptions=[], risks=[], review=d.review, result=d.result, tags=child.tags, derived=child.summary,
                 contributor=d.contributor, via_story=d.via_story, via_slack=d.via_slack, via_chat=d.via_chat,
                 via_vantage=d.via_vantage, domain=d.domain, parent_id=decision_id,
+                attachments=child.attachments,
             )
             db.add(c)
             new_rows.append(c)

@@ -61,6 +61,13 @@ from models import Persona as DBPersona
 from sqlalchemy import select
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+# Added 2026-09-04 — cost-only routing change for exactly 3 low-stakes,
+# structured-extraction calls (see the model= at each call site below):
+# generate_handoff_questions, extract_handoff_report, suggest_delegates.
+# Everything else (consolidate_memory, tidy_board_topics, plan_memory_split,
+# generate_story_questions, polish_vantage_gaps, run_agent_turn) stays on
+# MODEL/Sonnet — deliberately not moved, per direct founder instruction.
+HAIKU_MODEL = os.environ.get("CLAUDE_HAIKU_MODEL", "claude-haiku-4-5-20251001")
 MAX_TOOL_ROUNDS = 8
 
 # ---------------------------------------------------------------------------
@@ -830,6 +837,45 @@ def _resolve_files(client, file_ids: list) -> list:
     return files
 
 
+# ---------------------------------------------------------------------------
+# Prompt caching for the Ask Cognex loop — added 2026-09-04, cost-only change.
+#
+# Every round of run_agent_turn/run_agent_turn_stream re-sends the same
+# system prompt (persona rules + the decision-memory index) and the same 11
+# tool schemas, verbatim, up to MAX_TOOL_ROUNDS times. cache_control marks
+# each as a cache breakpoint so round 2+ of the same turn (and any later
+# turn in the same session, until something in the prompt actually changes)
+# reads that block at 0.1x the input price instead of paying full price
+# again — same bytes sent to the model, same behavior, cheaper billing only.
+#
+# Correctness: Claude always still receives the complete prompt, decision
+# index included — caching changes what gets billed, never what gets sent.
+# Anthropic's cache is a straight byte-match on the cached block: content
+# that has actually changed (a decision just auto-saved, the date rolling
+# over inside _system_prompt's own "today's real date" line, a different
+# persona) simply produces a different string, which is a cache MISS, not a
+# stale hit — the model sees the current, correct prompt either way. There
+# is no path where this can make an answer reflect stale information.
+def _cache_marked_tools() -> list:
+    """TOOL_SCHEMAS + SERVER_TOOLS with a cache breakpoint on the last entry
+    — caches all 11 tool definitions as one block. Returns a fresh list with
+    a shallow-copied last item each call so the shared module-level
+    TOOL_SCHEMAS/SERVER_TOOLS constants are never mutated (this is rebuilt
+    once per turn, outside the per-round loop, in both callers below)."""
+    tools = list(TOOL_SCHEMAS) + list(SERVER_TOOLS)
+    tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
+    return tools
+
+
+def _cached_system_prompt(persona: Persona, decisions: list) -> list:
+    """The system prompt (persona rules + the up-to-40-item decision index,
+    the most expensive and most identical-across-rounds part of every
+    round) as a single cache-marked content block. Built fresh from the
+    CURRENT decisions list on every call — see the module comment above for
+    why that keeps this exact, not stale."""
+    return [{"type": "text", "text": _system_prompt(persona, decisions), "cache_control": {"type": "ephemeral"}}]
+
+
 def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message: str, history=None, company_id: str = ""):
     # Rate/cap CHECKS deliberately live in the route handlers below, not
     # here — an HTTPException raised from inside this function would get
@@ -843,13 +889,14 @@ def run_agent_turn(persona: Persona, decisions: list, goals: list, user_message:
     messages.append({"role": "user", "content": user_message})
     tool_call_log = []
     file_ids = []
-    all_tools = TOOL_SCHEMAS + SERVER_TOOLS
+    all_tools = _cache_marked_tools()
+    system_prompt = _cached_system_prompt(persona, decisions)
     turn_cost_usd = 0.0
 
     try:
         for _ in range(MAX_TOOL_ROUNDS):
             response = client.messages.create(
-                model=MODEL, max_tokens=8192, system=_system_prompt(persona, decisions),
+                model=MODEL, max_tokens=8192, system=system_prompt,
                 tools=all_tools, tool_choice={"type": "auto"}, messages=messages,
             )
             turn_cost_usd += _usage_cost_usd(getattr(response, "usage", None))
@@ -960,13 +1007,14 @@ def run_agent_turn_stream(persona: Persona, decisions: list, goals: list, user_m
     messages.append({"role": "user", "content": user_message})
     tool_call_log = []
     file_ids = []
-    all_tools = TOOL_SCHEMAS + SERVER_TOOLS
+    all_tools = _cache_marked_tools()
+    system_prompt = _cached_system_prompt(persona, decisions)
     turn_cost_usd = 0.0
 
     try:
         for _ in range(MAX_TOOL_ROUNDS):
             with client.messages.stream(
-                model=MODEL, max_tokens=8192, system=_system_prompt(persona, decisions),
+                model=MODEL, max_tokens=8192, system=system_prompt,
                 tools=all_tools, tool_choice={"type": "auto"}, messages=messages,
             ) as stream:
                 for event in stream:
@@ -2128,7 +2176,7 @@ def generate_handoff_questions(persona: dict, goals: list, decisions: list) -> l
         context += "No individual goals or contributed decisions are on file for them — ask generally.\n"
 
     response = client.messages.create(
-        model=MODEL,
+        model=HAIKU_MODEL,
         max_tokens=512,
         system=(
             "You generate a short, targeted exit-interview-style question set for an employee who is "
@@ -2166,7 +2214,7 @@ def extract_handoff_report(persona: dict, qa_pairs: list) -> dict:
     client = Anthropic()
     transcript = "\n".join(f"Q: {p.get('question','')}\nA: {p.get('answer','')}" for p in qa_pairs)
     response = client.messages.create(
-        model=MODEL,
+        model=HAIKU_MODEL,
         max_tokens=768,
         system=(
             f"You turn {persona.get('name', 'an employee')}'s exit-interview answers into a clean structured "
@@ -2215,7 +2263,7 @@ def suggest_delegates(items: list, candidates: list) -> list:
     )
     items_text = "\n".join(f"- {i}" for i in items)
     response = client.messages.create(
-        model=MODEL,
+        model=HAIKU_MODEL,
         max_tokens=768,
         system=(
             "You match each handoff item to the best-fit candidate from the list, weighing department fit "

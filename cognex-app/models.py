@@ -122,6 +122,16 @@ class Decision(Base):
     # delete) without fighting a DB-level constraint.
     domain: Mapped[str] = mapped_column(String, default="other")
     parent_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Added 2026-09-04 for the node detail panel's Attachments section
+    # (direct founder ask: the panel should show "files, images, code etc
+    # related to this node", not just text). Each entry is a lightweight
+    # {id, filename, mimeType, sizeBytes} dict -- the same shape live.py's
+    # _resolve_files() already produces for a chat turn's generated/
+    # code_execution files -- so a node can list what it has without a
+    # second lookup at render time. Populated only when the chat turn that
+    # created or fed into this node actually carried files; empty is a
+    # real, honest state for a node with none, not a placeholder.
+    attachments: Mapped[list] = mapped_column(JSON, default=list)
 
     __table_args__ = (
         ForeignKeyConstraint(["company_id"], ["companies.id"]),
